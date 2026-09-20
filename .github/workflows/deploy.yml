@@ -15,7 +15,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run core tests
+        run: node test/smoke.mjs
+
   deploy:
+    needs: test
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -24,13 +37,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 只发布游戏本体，避免把 .git / test / node_modules 一起传上去
+      - name: Prepare static site
+        run: |
+          mkdir -p _site
+          cp index.html sw.js manifest.webmanifest icon.svg _site/
+          cp -r css js _site/
+          touch _site/.nojekyll
+          ls -R _site
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: _site
 
       - name: Deploy to GitHub Pages
         id: deployment
