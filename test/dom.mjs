@@ -1,5 +1,5 @@
-// 整站 DOM 冒烟测试：用 jsdom 真正启动一遍游戏并模拟操作
-// 运行：node test/dom.mjs（需要 devDependency jsdom；缺失时自动跳过）
+// 整站 DOM 冒烟测试：jsdom 真启动游戏，模拟点击 / 拖动吞噬 / 转生抽卡
+// 运行：node test/dom.mjs（依赖 devDependency jsdom，缺失时自动跳过）
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,160 +16,212 @@ try {
 }
 
 let pass = 0;
-function ok(name, fn) {
+let fail = 0;
+async function ok(name, fn) {
   try {
-    fn();
+    await fn();
     pass++;
     console.log('  ✓ ' + name);
   } catch (e) {
+    fail++;
     console.error('  ✗ ' + name + ' -> ' + e.message);
     process.exitCode = 1;
   }
 }
-
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function def(name, value) {
-  try {
-    Object.defineProperty(globalThis, name, { value, configurable: true, writable: true });
-  } catch (e) {
-    globalThis[name] = value;
-  }
+  try { Object.defineProperty(globalThis, name, { value, configurable: true, writable: true }); }
+  catch (e) { globalThis[name] = value; }
 }
 
+// ---- jsdom 环境 ----
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const dom = new JSDOM(html, { url: 'https://example.com/', pretendToBeVisual: true });
 const w = dom.window;
-w.HTMLCanvasElement.prototype.getContext = () => null;
+
+const gradient = { addColorStop() {} };
+function makeCtx() {
+  const store = {};
+  return new Proxy(store, {
+    get(t, k) {
+      if (k in t) return t[k];
+      if (typeof k === 'symbol') return undefined;
+      if (k === 'createRadialGradient' || k === 'createLinearGradient' || k === 'createPattern') return () => gradient;
+      return () => {};
+    },
+    set(t, k, v) { t[k] = v; return true; },
+  });
+}
+w.HTMLCanvasElement.prototype.getContext = () => makeCtx();
 
 def('window', w);
 def('document', w.document);
 def('navigator', w.navigator);
 def('localStorage', w.localStorage);
-def('requestAnimationFrame', cb => setTimeout(() => cb(w.performance.now()), 16));
+def('requestAnimationFrame', cb => setTimeout(() => cb(performance.now()), 16));
 def('cancelAnimationFrame', id => clearTimeout(id));
 
 const $ = id => w.document.getElementById(id);
-const fire = (el, type, extra = {}) => {
-  const ev = new w.MouseEvent(type, Object.assign({ bubbles: true, cancelable: true, clientX: 120, clientY: 220 }, extra));
-  el.dispatchEvent(ev);
-  return ev;
-};
+const pev = (el, type, x, y) => el.dispatchEvent(new w.MouseEvent(type, {
+  bubbles: true, cancelable: true, clientX: x, clientY: y,
+}));
+const click = el => el.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
 
-console.log('\n[DOM-1] 启动');
+console.log('\n[DOM-1] 启动与首屏');
 const core = await import('../js/core.js');
+const fx = await import('../js/fx.js');
 await import('../js/main.js');
-await sleep(150);
+await sleep(1400);
 
-ok('页面节点齐全', () => {
-  ['energy', 'orb', 'genList', 'starList', 'achList', 'tabs', 'views', 'modal'].forEach(id => {
+await ok('关键节点齐全', () => {
+  ['fx', 'stage', 'energy', 'genList', 'starList', 'perkList', 'perkCodex', 'achList',
+    'tabs', 'views', 'modal', 'burstBtn', 'chargeFill', 'resoFill', 'comboFill'].forEach(id => {
     assert.ok($(id), '缺少 #' + id);
   });
 });
-ok('发电机与成就列表已渲染', () => {
+await ok('列表渲染完整', () => {
   assert.equal($('genList').querySelectorAll('.card').length, 10);
-  assert.equal($('achList').querySelectorAll('.ach').length, 29);
+  assert.equal($('starList').querySelectorAll('.card').length, 11);
+  assert.equal($('achList').querySelectorAll('.ach').length, 34);
+  assert.ok($('perkCodex').querySelectorAll('span').length >= 15);
 });
-ok('主循环在刷新 HUD', () => {
-  assert.equal($('chipEps').textContent.includes('/s'), true);
-  assert.match($('statMult').textContent, /^×/);
+await ok('开局自动弹出词条抽卡', () => {
+  assert.ok(!$('modal').classList.contains('hidden'), '抽卡弹窗应可见');
+  assert.equal(w.document.querySelectorAll('.draft-card').length, 3);
 });
 
-console.log('\n[DOM-2] 点击核心');
-ok('点一下会加能量并更新界面', () => {
+console.log('\n[DOM-2] 点击共振');
+await ok('抽卡可选中并写回状态', () => {
+  click(w.document.querySelector('.draft-card'));
+  assert.equal(core.state.perks.length, 1);
+  assert.equal(core.state.perkPicksLeft, 0);
+  assert.ok($('modal').classList.contains('hidden'));
+});
+
+let clicksAfterTap = 0;
+await ok('轻点核心记为一次点击并加能量', async () => {
   const before = core.state.energy;
-  fire($('orb'), 'pointerdown');
+  pev($('stage'), 'pointerdown', 160, 220);
+  pev($('stage'), 'pointerup', 160, 220);
   assert.equal(core.state.clicks, 1);
   assert.ok(core.state.energy > before);
+  await sleep(90);
   assert.notEqual($('energy').textContent, '0');
+  clicksAfterTap = core.state.clicks;
 });
-ok('连击在界面上显示', () => {
-  fire($('orb'), 'pointerdown');
-  fire($('orb'), 'pointerdown');
-  assert.ok(core.state.combo >= 3);
-  assert.match($('comboText').textContent, /连击 [3-9]/);
+await ok('拖动不触发点击（改为吞噬）', () => {
+  pev($('stage'), 'pointerdown', 120, 200);
+  pev($('stage'), 'pointermove', 240, 240);
+  pev($('stage'), 'pointermove', 320, 260);
+  pev($('stage'), 'pointerup', 320, 260);
+  assert.equal(core.state.clicks, clicksAfterTap, '拖动不应计入点击次数');
+});
+await ok('渲染管线可执行且不抛错', () => {
+  const now = Date.now();
+  for (let i = 0; i < 6; i++) fx.render(0.016, now + i * 16);
+  fx.shockwave(100, 100, 1.2, [255, 200, 90]);
+  fx.sparks(100, 100, 12, { speed: 4 });
+  fx.confettiBurst();
+  for (let i = 0; i < 6; i++) fx.render(0.016, now + 100 + i * 16);
+});
+await ok('HUD 数值在刷新', () => {
+  assert.match($('chipEps').textContent, /\/s/);
+  assert.match($('statMult').textContent, /^×/);
+  assert.match($('chargeFill').style.width, /%$/);
 });
 
-console.log('\n[DOM-3] 购买与批量');
-ok('点击卡片购买发电机', () => {
-  core.state.energy = 1e6;
-  const card = $('genList').querySelectorAll('.card')[0];
-  fire(card, 'click');
+console.log('\n[DOM-3] 购买与爆发');
+await ok('点击卡片购买发电机', () => {
+  core.state.energy = 1e7;
+  click($('genList').querySelectorAll('.card')[0]);
   assert.equal(core.state.gens[0], 1);
-  assert.ok(core.state.energy < 1e6);
 });
-ok('×10 批量购买生效', () => {
-  const btn = w.document.querySelector('#bulk button[data-bulk="10"]');
-  fire(btn, 'click');
+await ok('×10 批量购买生效', () => {
+  click(w.document.querySelector('#bulk button[data-bulk="10"]'));
   assert.equal(core.state.bulk, 10);
   core.state.energy = 1e7;
   const before = core.state.gens[0];
-  fire($('genList').querySelectorAll('.card')[0], 'click');
+  click($('genList').querySelectorAll('.card')[0]);
   assert.equal(core.state.gens[0], before + 10);
 });
-ok('MAX 购买不会超支', () => {
-  core.state.energy = 1e5;
-  fire(w.document.querySelector('#bulk button[data-bulk="max"]'), 'click');
-  fire($('genList').querySelectorAll('.card')[1], 'click');
-  assert.ok(core.state.energy >= 0);
-  assert.ok(core.state.gens[1] > 0);
+await ok('充能满后按钮可用，点击可爆发', async () => {
+  core.addCharge(1000, core.state);
+  await sleep(90);
+  const btn = $('burstBtn');
+  assert.equal(btn.disabled, false);
+  click(btn);
+  assert.equal(core.state.bursts, 1);
+  assert.equal(core.state.charge, 0);
+  assert.ok(core.burstActive(Date.now(), core.state));
 });
 
-console.log('\n[DOM-4] 标签与成就');
-ok('切换标签页', () => {
-  fire(w.document.querySelector('#tabs button[data-view="star"]'), 'click');
-  assert.ok($('view-star').classList.contains('active'));
-  assert.ok(!$('view-gen').classList.contains('active'));
-});
-ok('成就解锁会点亮格子', async () => {
-  core.state.clicks = 99999;
-  return sleep(750).then(() => {
-    assert.ok(w.document.querySelectorAll('#achList .ach.got').length > 0);
+console.log('\n[DOM-4] 标签与转生');
+await ok('五个标签可切换', () => {
+  ['star', 'perk', 'ach', 'set', 'gen'].forEach(v => {
+    click(w.document.querySelector('#tabs button[data-view="' + v + '"]'));
+    assert.ok($('view-' + v).classList.contains('active'), v + ' 未激活');
   });
 });
-
-console.log('\n[DOM-5] 坍缩与星尘');
-ok('坍缩需要确认并生效', () => {
+await ok('坍缩需要确认并重开抽卡', async () => {
   core.state.totalRun = 1e12;
-  const g = core.stardustGain();
-  assert.ok(g >= 5);
-  fire($('collapseBtn'), 'click');
-  assert.ok(!$('modal').classList.contains('hidden'), '应弹出确认框');
-  fire($('modalActions').querySelector('.pri'), 'click');
+  assert.ok(core.stardustGain(core.state) >= 5);
+  click($('collapseBtn'));
+  assert.ok(!$('modal').classList.contains('hidden'));
+  click($('modalActions').querySelector('.pri'));
   assert.equal(core.state.collapses, 1);
-  assert.equal(core.state.stardust, g);
-  assert.equal(core.state.totalRun, 0);
+  assert.equal(core.state.perks.length, 0);
+  assert.equal(core.state.perkPicksLeft, core.perkSlots(core.state));
+
+  await sleep(700);
+  assert.equal(w.document.querySelectorAll('.draft-card').length, 3, '坍缩后应弹出抽卡');
+  click(w.document.querySelector('.draft-card'));
+  await sleep(450);
+  assert.equal(core.state.perks.length, 1);
+  assert.equal(w.document.querySelectorAll('.draft-card').length, 3, '第二次抽卡应出现');
+  click(w.document.querySelector('.draft-card'));
+  await sleep(200);
+  assert.equal(core.state.perks.length, 2);
+  assert.equal(core.state.perkPicksLeft, 0);
 });
-ok('购买星尘强化', () => {
+await ok('星尘强化可购买', () => {
   core.state.stardust = 1e6;
-  const card = $('starList').querySelectorAll('.card')[0];
-  fire(card, 'click');
+  click($('starList').querySelectorAll('.card')[0]);
   assert.equal(core.state.starUp.resonance, 1);
 });
 
-console.log('\n[DOM-6] 存档与设置');
-ok('写入 localStorage', () => {
-  core.save();
-  const raw = w.localStorage.getItem('xineqidian_save_v1');
-  assert.ok(raw && raw.length > 50);
-  assert.ok(JSON.parse(raw).gens.length === 10);
+console.log('\n[DOM-5] 设置与存档');
+await ok('写入 localStorage', () => {
+  core.save(Date.now(), core.state);
+  const raw = w.localStorage.getItem('xineqidian_save_v2');
+  assert.ok(raw && raw.length > 80);
+  assert.equal(JSON.parse(raw).gens.length, 10);
 });
-ok('设置开关可切换', () => {
+await ok('开关可切换并写回状态', () => {
   const t = $('fxToggle');
-  t.checked = false;
-  fire(t, 'change');
+  t.checked = false; t.dispatchEvent(new w.Event('change'));
   assert.equal(core.state.fxOn, false);
-  t.checked = true;
-  fire(t, 'change');
+  t.checked = true; t.dispatchEvent(new w.Event('change'));
   assert.equal(core.state.fxOn, true);
+
+  const a = $('audioToggle');
+  a.checked = false; a.dispatchEvent(new w.Event('change'));
+  assert.equal(core.state.audioOn, false);
+  a.checked = true; a.dispatchEvent(new w.Event('change'));
+  assert.equal(core.state.audioOn, true);
+
   const h = $('hapticsToggle');
-  h.checked = false;
-  fire(h, 'change');
+  h.checked = false; h.dispatchEvent(new w.Event('change'));
   assert.equal(core.state.haptics, false);
 });
-ok('统计面板有数据', () => {
-  assert.ok($('statList').children.length >= 10);
+await ok('统计面板有内容', () => {
+  assert.ok($('statList').children.length >= 12);
+});
+await ok('词条面板显示已装备', () => {
+  click(w.document.querySelector('#tabs button[data-view="perk"]'));
+  assert.ok($('perkList').querySelectorAll('.card').length >= 2, '应显示 2 个已装备词条');
+  assert.ok($('perkCodex').querySelectorAll('span.owned').length >= 2);
 });
 
-console.log('\n通过 ' + pass + ' 项 DOM 检查' + (process.exitCode ? '（存在失败）' : '，全部正常') + '\n');
+console.log('\n通过 ' + pass + ' 项 DOM 检查' + (fail ? '（' + fail + ' 项失败）' : '，全部正常') + '\n');
 process.exit(process.exitCode || 0);

@@ -1,60 +1,68 @@
-// 入口：启动循环、自动保存、离线结算、Service Worker
+// ============ 入口：读档 → 构建界面 → 主循环 ============
 import * as core from './core.js';
-import { initUi, updateHud, renderAll, showOfflineModal, showToast } from './ui.js';
-import { initFx } from './fx.js';
+import { initUi, hud, renderAll, showOfflineModal, toast } from './ui.js';
+import * as fx from './fx.js';
+import * as audio from './audio.js';
 
 let last = 0;
-let lastSave = 0;
 let started = false;
 
 function boot() {
-  // 1. 先读档，再构建界面
-  const had = core.load();
-  window.__haptics = core.state.haptics !== false;
+  // 1. 读档
+  const had = core.load(core.state);
   core.state.nextOrbAt = 0;
+  core.state.pulseStart = Date.now();
+  window.__haptics = core.state.haptics !== false;
 
-  // 2. 特效与界面
-  initFx(document.getElementById('fx'));
+  // 2. 渲染器 + 界面
+  const canvas = document.getElementById('fx');
+  const stage = document.getElementById('stage');
+  fx.initFx(canvas, stage);
   initUi();
   renderAll();
 
-  const now = Date.now();
-
   // 3. 离线收益
+  const now = Date.now();
   if (had) {
-    const off = core.applyOffline(now);
+    const off = core.applyOffline(now, core.state);
     if (off && off.gain > 1) showOfflineModal(off);
-    else if (off) showToast('离线收益 +' + Math.round(off.gain), 'green');
+    else if (off) toast('离线收益 +' + Math.round(off.gain), 'green');
   } else {
-    showToast('点击核心开始吸能', 'gold');
+    toast('轻点核心踩节拍 · 拖动吞噬光团', 'gold');
   }
 
-  // 4. 主循环
+  // 4. 首次交互解锁音频
+  const kick = () => {
+    audio.initAudio();
+    audio.resumeAudio();
+    window.removeEventListener('pointerdown', kick);
+    window.removeEventListener('touchstart', kick);
+  };
+  window.addEventListener('pointerdown', kick, { once: true });
+  window.addEventListener('touchstart', kick, { once: true });
+
+  // 5. 主循环
   last = performance.now();
   requestAnimationFrame(loop);
 
-  // 5. 自动保存
-  setInterval(() => {
-    core.save();
-    lastSave = Date.now();
-  }, 15000);
+  // 6. 自动保存
+  setInterval(() => core.save(Date.now(), core.state), 15000);
 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
-      core.save();
+      core.save(Date.now(), core.state);
     } else {
       const t = Date.now();
-      const off = core.applyOffline(t);
+      const off = core.applyOffline(t, core.state);
       if (off && off.gain > 1) showOfflineModal(off);
       renderAll();
     }
   });
+  window.addEventListener('beforeunload', () => core.save(Date.now(), core.state));
+  window.addEventListener('pagehide', () => core.save(Date.now(), core.state));
 
-  window.addEventListener('beforeunload', () => core.save());
-  window.addEventListener('pagehide', () => core.save());
-
-  // 6. 可安装 / 离线
-  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  // 7. 离线可玩
+  if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
   started = true;
@@ -69,8 +77,9 @@ function loop(t) {
   if (dt > 0.5) dt = 0.5;
 
   const now = Date.now();
-  core.tick(dt, now);
-  updateHud(now);
+  core.tick(dt, now, core.state);
+  fx.render(dt, now);
+  hud(now);
 }
 
 if (document.readyState === 'loading') {
