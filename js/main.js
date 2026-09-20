@@ -61,9 +61,17 @@ function boot() {
   window.addEventListener('beforeunload', () => core.save(Date.now(), core.state));
   window.addEventListener('pagehide', () => core.save(Date.now(), core.state));
 
-  // 7. 离线可玩
+// 7. 离线可玩 + 版本自更新（避免旧 Service Worker 缓存住老代码）
   if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
+    navigator.serviceWorker.register('./sw.js').then(reg => {
+      if (reg && reg.update) reg.update().catch(() => {});
+    }).catch(() => {});
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloading) return;
+      reloading = true;
+      location.reload();
+    });
   }
   started = true;
 }

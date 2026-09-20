@@ -1,8 +1,8 @@
 // ============ 界面渲染与交互 ============
 import {
-  GENERATORS, STAR_UPGRADES, PERKS, ACHIEVEMENTS,
+  GENERATORS, STAR_UPGRADES, PERKS, ACHIEVEMENTS, MORPHS,
   RARE_COLOR, RARE_LABEL, COMBO_MAX, COMBO_WINDOW, CHARGE_MAX, RESO_MAX,
-  BOOST_MULT, COLLAPSE_REQUIRE, SINGULARITY_REQUIRE,
+  BOOST_MULT, COLLAPSE_REQUIRE, SINGULARITY_REQUIRE, ECHO_RATE,
 } from './data.js';
 import * as core from './core.js';
 import { format, formatTime } from './util.js';
@@ -12,6 +12,8 @@ import * as audio from './audio.js';
 const $ = id => document.getElementById(id);
 const PERK_BY_ID = {};
 for (const p of PERKS) PERK_BY_ID[p.id] = p;
+const MORPH_BY_ID = {};
+for (const m of MORPHS) MORPH_BY_ID[m.id] = m;
 
 let genRefs = [];
 let starRefs = {};
@@ -22,6 +24,8 @@ let dragging = false;
 let pointerInfo = null;
 let lastSweep = null;
 let draftArmedAt = 0;
+let draftQueued = false;
+let draftBound = false;
 let lastList = 0;
 let lastAch = 0;
 let lastAutoBuy = 0;
@@ -93,6 +97,10 @@ function wire() {
   });
 
   $('burstBtn').addEventListener('click', doBurst);
+  $('pickPerkBtn').addEventListener('click', () => showDraft());
+  $('recordBtn').addEventListener('click', onRecord);
+  $('clearEchoBtn').addEventListener('click', onClearEcho);
+  $('morphList').addEventListener('click', onMorphClick);
 
   const ab = $('autoBuyToggle');
   ab.addEventListener('change', () => {
@@ -334,10 +342,12 @@ export function showDraft() {
   const cards = choices.map(id => {
     const p = PERK_BY_ID[id];
     if (!p) return '';
-    return '<div class="draft-card" data-perk="' + p.id + '" style="--rc:' + RARE_COLOR[p.rare] + '">' +
-      '<div class="di">' + p.icon + '</div>' +
-      '<div><div class="dn">' + p.name + ' <em>' + RARE_LABEL[p.rare] + '</em></div>' +
-      '<div class="dd">' + p.desc + '</div></div></div>';
+    return '<button type="button" class="draft-card" data-perk="' + p.id + '" style="--rc:' + RARE_COLOR[p.rare] + '">' +
+      '<span class="di">' + p.icon + '</span>' +
+      '<span class="dc"><span class="dn">' + p.name + ' <em>' + RARE_LABEL[p.rare] + '</em></span>' +
+      '<span class="dd">' + p.desc + '</span></span>' +
+      '<span class="pick-hint">选择 ›</span>' +
+      '</button>';
   }).join('');
   const rc = core.rerollCost(s);
   const body =
@@ -345,44 +355,60 @@ export function showDraft() {
     '<div class="draft-sub">本轮还可选 ' + s.perkPicksLeft + ' 个 · 坍缩后重置</div>' +
     '<div class="draft-list">' + cards + '</div>' +
     '<div class="draft-foot">' +
-      '<button id="draftReroll"' + (s.stardust < rc ? ' disabled' : '') + '>重抽 ✦' + format(rc) + '</button>' +
-      '<button id="draftSkip">跳过 +✦1</button>' +
+      '<button type="button" id="draftReroll"' + (s.stardust < rc ? ' disabled' : '') + '>重抽 ✦' + format(rc) + '</button>' +
+      '<button type="button" id="draftSkip">跳过 +✦1</button>' +
     '</div>';
   showModal('奇点词条', body, [], true);
 
-  document.querySelectorAll('.draft-card').forEach(el => {
-    el.addEventListener('click', () => {
-      const id = el.dataset.perk;
-      const res = core.pickPerk(id, core.state);
-      if (!res) return;
-      audio.sfxUpgrade();
-      const p = PERK_BY_ID[id];
-      toast('获得词条：' + p.icon + ' ' + p.name, 'violet');
-      inDraft = false;
-      hideModal();
-      updateLists(Date.now(), true);
-      if (core.state.perkPicksLeft > 0) setTimeout(showDraft, 260);
-      else core.save();
-    });
-  });
+  const box = $('modalBody');
+  if (!draftBound) {
+    draftBound = true;
+    box.addEventListener('click', onDraftClick);
+  }
   const rb = $('draftReroll');
-  if (rb) rb.addEventListener('click', () => {
-    const r = core.rerollPerks(core.state);
-    if (!r) { audio.sfxError(); return; }
-    audio.sfxBuy();
-    inDraft = false;
-    hideModal();
-    setTimeout(showDraft, 60);
-  });
+  if (rb) rb.addEventListener('click', onDraftReroll);
   const sb = $('draftSkip');
-  if (sb) sb.addEventListener('click', () => {
-    core.skipPerk(core.state);
-    inDraft = false;
-    hideModal();
-    updateLists(Date.now(), true);
-    if (core.state.perkPicksLeft > 0) setTimeout(showDraft, 260);
-    else core.save();
-  });
+  if (sb) sb.addEventListener('click', onDraftSkip);
+}
+
+function onDraftClick(ev) {
+  const card = ev.target && ev.target.closest ? ev.target.closest('.draft-card') : null;
+  if (!card) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  const id = card.getAttribute('data-perk');
+  const res = core.pickPerk(id, core.state);
+  if (!res) { audio.sfxError(); return; }
+  audio.sfxUpgrade();
+  const p = PERK_BY_ID[id];
+  if (p) toast('获得词条：' + p.icon + ' ' + p.name, 'violet');
+  inDraft = false;
+  hideModal();
+  updateLists(Date.now(), true);
+  if (core.state.perkPicksLeft > 0) setTimeout(showDraft, 300);
+  else core.save();
+}
+
+function onDraftReroll(ev) {
+  if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+  const r = core.rerollPerks(core.state);
+  if (!r) { audio.sfxError(); toast('星尘不够重抽'); return; }
+  audio.sfxBuy();
+  inDraft = false;
+  hideModal();
+  setTimeout(showDraft, 80);
+}
+
+function onDraftSkip(ev) {
+  if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+  const r = core.skipPerk(core.state);
+  if (!r) return;
+  audio.sfxBuy();
+  inDraft = false;
+  hideModal();
+  updateLists(Date.now(), true);
+  if (core.state.perkPicksLeft > 0) setTimeout(showDraft, 300);
+  else core.save();
 }
 
 /* ---------------- 转生 ---------------- */
@@ -547,7 +573,7 @@ export function hud(now) {
   const resoFill = $('resoFill');
   const resoVal = $('resoVal');
   if (resoVal.textContent !== String(s.reso)) resoVal.textContent = String(s.reso);
-  const rp = Math.min(100, (s.reso / RESO_MAX) * 100);
+  const rp = Math.min(100, (s.reso / core.resoMax(s)) * 100);
   resoFill.style.width = rp + '%';
   resoFill.classList.toggle('hot', s.reso >= 10);
 
@@ -608,9 +634,21 @@ export function hud(now) {
   // 自动购买
   if (s.autoBuy && now - lastAutoBuy > 250) { lastAutoBuy = now; core.autoBuyTick(s); }
 
-  // 词条抽卡
-  if (!inDraft && s.perkPicksLeft > 0 && now > draftArmedAt && $('modal').classList.contains('hidden')) {
-    setTimeout(() => { if (!inDraft) showDraft(); }, 30);
+// 词条抽卡（只排队一次，避免重复触发与互相覆盖）
+  if (!inDraft && !draftQueued && s.perkPicksLeft > 0 && now > draftArmedAt && $('modal').classList.contains('hidden')) {
+    draftQueued = true;
+    setTimeout(() => {
+      draftQueued = false;
+      if (!inDraft && core.state.perkPicksLeft > 0 && $('modal').classList.contains('hidden')) showDraft();
+    }, 80);
+  }
+
+  // 录制倒计时
+  if (s.recording) {
+    const left = Math.max(0, (s.recordStart + s.recordLen * 1000 - now) / 1000);
+    const rb = $('recordBtn');
+    if (rb) rb.textContent = '录制中 ' + left.toFixed(1) + 's';
+    if (now >= s.recordStart + s.recordLen * 1000) finishRecord();
   }
 
   if (now - lastList > 240) { lastList = now; updateLists(now, false); }
@@ -627,7 +665,9 @@ function buildAchFlags() {
 export function renderAll() {
   updateLists(Date.now(), true);
   buildAchFlags();
+  renderMorphPanel();
   renderPerkPanel();
+  renderEchoPanel();
   renderStats();
   syncToggles();
 }
@@ -719,6 +759,123 @@ function renderPerkPanel() {
   document.querySelectorAll('#perkCodex span').forEach(el => {
     el.classList.toggle('owned', s.perks.includes(el.dataset.perk));
   });
+}
+
+function renderMorphPanel() {
+  const s = core.state;
+  const unlocked = core.morphUnlocked(s);
+  const cur = s.morph ? MORPH_BY_ID[s.morph] : null;
+  $('morphInfo').textContent = cur ? (cur.icon + ' ' + cur.name) : (unlocked ? '可选 1 个' : '未解锁');
+  $('morphList').innerHTML = MORPHS.map(m => {
+    const picked = s.morph === m.id;
+    const locked = !unlocked;
+    return '<button type="button" class="morph-card' + (picked ? ' pick' : '') + (locked ? ' locked' : '') + '"' +
+      ' data-morph="' + m.id + '" style="--mc:' + m.color + '">' +
+      '<span class="mi">' + m.icon + '</span>' +
+      '<span class="mn">' + m.name + '</span>' +
+      '<span class="mt">' + m.tag + '</span>' +
+      '<span class="md">' + m.desc + '</span>' +
+      '</button>';
+  }).join('');
+}
+
+function onMorphClick(ev) {
+  const card = ev.target && ev.target.closest ? ev.target.closest('.morph-card') : null;
+  if (!card) return;
+  const s = core.state;
+  if (!core.morphUnlocked(s)) { toast('坍缩 1 次后解锁核心形态'); audio.sfxError(); return; }
+  if (s.morph) { toast('本世形态已确定 · 飞升奇点后可重选'); return; }
+  const id = card.getAttribute('data-morph');
+  const m = MORPH_BY_ID[id];
+  if (!m) return;
+  showModal('确定核心形态 · ' + m.icon + ' ' + m.name,
+    m.desc + '<br><br><b>本世不可更改</b>，飞升奇点后可重选。',
+    [
+      { label: '再想想' },
+      { label: '就选它', pri: true, onClick: () => {
+        const r = core.chooseMorph(id, core.state);
+        if (!r) return;
+        const c = fx.coreScreenPos();
+        fx.confettiBurst();
+        fx.shockwave(c.x, c.y, 2.2, hexToRgb(m.color));
+        fx.flash(0.5);
+        audio.sfxPrestige();
+        vibrate([18, 40, 18]);
+        toast('核心形态：' + m.icon + ' ' + m.name, 'violet');
+        core.save();
+        renderAll();
+      } },
+    ], true);
+}
+
+function renderEchoPanel() {
+  const s = core.state;
+  const unlocked = core.echoUnlocked(s);
+  const btn = $('recordBtn');
+  const clr = $('clearEchoBtn');
+  const body = $('echoBody');
+
+  if (s.recording) {
+    btn.classList.add('rec');
+    btn.disabled = true;
+    clr.classList.add('hidden');
+    return;
+  }
+  btn.classList.remove('rec');
+  btn.disabled = !unlocked;
+
+  if (!unlocked) {
+    $('echoInfo').textContent = '未解锁';
+    body.innerHTML = '坍缩 <b>2 次</b>后解锁。录下你 4 秒的操作，它会变成自动演奏的分身。';
+    btn.textContent = '未解锁';
+    clr.classList.add('hidden');
+    return;
+  }
+
+  if (!core.hasEcho(s)) {
+    $('echoInfo').textContent = '待录制';
+    body.innerHTML = '录下你 4 秒的操作，它会变成自动演奏的分身，循环复现你的完美率。';
+    btn.textContent = '录制残响';
+    clr.classList.add('hidden');
+    return;
+  }
+
+  const e = s.echo;
+  $('echoInfo').textContent = Math.round(e.rate * 100) + '% 完美';
+  btn.textContent = '重新录制';
+  body.innerHTML =
+    '<div class="echo-stats">' +
+      '<div class="echo-stat"><span>录制点击</span><b>' + e.taps.length + '</b></div>' +
+      '<div class="echo-stat"><span>完美率</span><b>' + Math.round(e.rate * 100) + '%</b></div>' +
+      '<div class="echo-stat"><span>循环</span><b>' + e.len.toFixed(1) + 's</b></div>' +
+      '<div class="echo-stat"><span>已触发</span><b>' + format(s.echoHits) + '</b></div>' +
+    '</div>' +
+    '<div class="hint">残响以 ' + Math.round(ECHO_RATE * 100) + '% 的点击力自动演奏，完美段位照样叠共振。</div>';
+  clr.classList.remove('hidden');
+}
+
+function onRecord() {
+  const s = core.state;
+  if (s.recording) return;
+  const len = core.startRecord(Date.now(), s);
+  if (!len) { toast('坍缩 2 次后解锁残响录制'); audio.sfxError(); return; }
+  audio.initAudio();
+  audio.resumeAudio();
+  toast('开始录制：' + len + ' 秒内随便点，尽量踩完美', 'violet');
+  renderEchoPanel();
+}
+
+function finishRecord() {
+  const e = core.finishRecord(Date.now(), core.state);
+  audio.sfxUpgrade();
+  if (e) toast('残响完成：' + e.taps.length + ' 次点击 · 完美率 ' + Math.round(e.rate * 100) + '%', 'gold');
+  renderEchoPanel();
+}
+
+function onClearEcho() {
+  core.clearEcho(core.state);
+  toast('残响已清除');
+  renderEchoPanel();
 }
 
 function renderStats() {

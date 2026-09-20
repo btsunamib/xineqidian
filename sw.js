@@ -1,5 +1,5 @@
 // 离线缓存：让游戏断网也能打开
-const CACHE = 'xineqidian-v3';
+const CACHE = 'xineqidian-v4';
 const ASSETS = [
   './',
   './index.html',

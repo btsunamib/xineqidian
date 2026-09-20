@@ -123,3 +123,37 @@ export const OFFLINE_CAP  = 8 * 3600;
 export const OFFLINE_BASE = 0.5;
 export const ACH_BONUS    = 0.02;
 export const REROLL_COST  = 3;        // 重抽词条消耗星尘（每轮递增）
+
+// ============ 核心形态：不可逆分支，直接改变核心循环与判定方式 ============
+export const MORPHS = [
+  {
+    id: 'spiral', name: '螺旋', icon: '🌀', color: '#6ee7ff',
+    tag: '均衡 · 共振不衰减',
+    desc: '共振层永不衰减，全局产量 +15%。最稳的起手形态。',
+    effects: { prodMult: 1.15, resoDecayMult: 0, resoMax: 20 },
+  },
+  {
+    id: 'prism', name: '棱镜', icon: '🔺', color: '#b39dff',
+    tag: '分裂 · 一击三判',
+    desc: '每次点击分裂成 3 段独立判定，各自可能完美并叠共振；单段收益 ×0.45，共振上限提到 30。',
+    effects: { clickSplit: 3, clickMult: 0.45, resoMax: 30 },
+  },
+  {
+    id: 'maw', name: '噬渊', icon: '🦷', color: '#ff6ad5',
+    tag: '吞噬 · 拖动为主',
+    desc: '吞噬收益 ×12，且每次吞噬叠 1 层共振；代价是自动产量 ×0.35。',
+    effects: { devourMult: 12, prodMult: 0.35, resoPerDevour: 1 },
+  },
+  {
+    id: 'pulsar', name: '脉冲星', icon: '📡', color: '#ffcc4d',
+    tag: '爆发 · 充能极快',
+    desc: '爆发时长 ×2、爆发产量再 ×3；代价是常态产量 ×0.6，脉动快 25%（更难踩）。',
+    effects: { burstDurationMult: 2, burstMult: 3, prodMult: 0.6, pulseSpeed: 1.25 },
+  },
+];
+
+export const MORPH_UNLOCK_COLLAPSES = 1;   // 坍缩 1 次后解锁形态
+export const RECORD_LEN  = 4;              // 残响录制时长（秒）
+export const ECHO_RATE   = 0.6;            // 残响收益系数
+export const ECHO_UNLOCK_COLLAPSES = 2;    // 坍缩 2 次后解锁残响录制
+export const ECHO_MAX_TAPS = 120;          // 单次录制最多记录点击数

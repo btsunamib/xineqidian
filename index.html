@@ -88,10 +88,25 @@
 
     <section class="view" id="view-perk">
       <div class="panel">
+        <div class="row"><span>核心形态</span><b id="morphInfo">未解锁</b></div>
+        <div class="hint">坍缩 1 次后解锁。形态直接改变核心循环，飞升奇点后可重选。</div>
+      </div>
+      <div id="morphList" class="morph-grid"></div>
+
+      <div class="panel">
         <div class="row"><span>本轮词条</span><b id="perkSlotInfo">0/2</b></div>
+        <button id="pickPerkBtn" class="big-btn hidden">选择词条</button>
         <div class="hint">每次坍缩后可重选词条，形成不同流派。用星尘升级「词条槽位」可多带 1 个。</div>
       </div>
       <div id="perkList" class="list"></div>
+
+      <div class="panel">
+        <div class="row"><span>残响录制</span><b id="echoInfo">未解锁</b></div>
+        <div id="echoBody" class="hint">录下你 4 秒的操作，它会变成自动演奏的分身，循环复现你的完美率。</div>
+        <button id="recordBtn" class="big-btn dark">录制残响</button>
+        <button id="clearEchoBtn" class="big-btn danger hidden">清除残响</button>
+      </div>
+
       <div class="panel">
         <div class="set-title">词条图鉴</div>
         <div id="perkCodex" class="codex"></div>

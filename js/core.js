@@ -1,20 +1,25 @@
 // ============ 核心逻辑（纯计算，不接触 DOM，可单元测试） ============
 import {
-  GENERATORS, STAR_UPGRADES, PERKS, ACHIEVEMENTS, RARE_WEIGHT,
+  GENERATORS, STAR_UPGRADES, PERKS, ACHIEVEMENTS, RARE_WEIGHT, MORPHS,
   PULSE_PERIOD, PERFECT_WINDOW, PERFECT_MULT, RESO_MAX, RESO_BONUS, RESO_DECAY,
   CHARGE_MAX, CHARGE_CLICK, CHARGE_PERFECT, BURST_DURATION, BURST_MULT,
   CRIT_CHANCE, CRIT_MULT, COMBO_WINDOW, COMBO_STEP, COMBO_MAX,
   CLICK_SHARE, BOOST_MULT, DEVOUR_BASE,
   COLLAPSE_REQUIRE, SINGULARITY_REQUIRE, OFFLINE_CAP, OFFLINE_BASE, ACH_BONUS, REROLL_COST,
+  MORPH_UNLOCK_COLLAPSES, RECORD_LEN, ECHO_RATE, ECHO_UNLOCK_COLLAPSES, ECHO_MAX_TAPS,
 } from './data.js';
 
 export const SAVE_KEY = 'xineqidian_save_v2';
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 export const PERK_BY_ID = {};
 for (const p of PERKS) PERK_BY_ID[p.id] = p;
 
-const MULT_KEYS = ['prodMult', 'clickMult', 'costMult', 'critMult', 'stardustMult', 'burstMult', 'chainMult', 'devourMult', 'offlineCapMult'];
+export const MORPH_BY_ID = {};
+for (const m of MORPHS) MORPH_BY_ID[m.id] = m;
+
+const MULT_KEYS = ['prodMult', 'clickMult', 'costMult', 'critMult', 'stardustMult', 'burstMult',
+  'chainMult', 'devourMult', 'offlineCapMult', 'burstDurationMult'];
 
 export function newState() {
   return {
@@ -31,6 +36,9 @@ export function newState() {
     reso: 0, resoAt: 0, maxReso: 0, resoDecayAcc: 0,
     charge: 0, burstUntil: 0, bursts: 0,
     perks: [], perkChoices: [], perkPicksLeft: 1, perksTaken: 0, rerolls: 0,
+    morph: null, morphAt: 0,
+    echo: null, echoAcc: 0, echoIdx: 0, echoHits: 0,
+    recording: false, recordStart: 0, recordBuf: [], recordLen: RECORD_LEN,
     chainUntil: 0,
     pulseStart: 0,
     boostUntil: 0, boostMult: BOOST_MULT,
@@ -72,6 +80,46 @@ export function perkAgg(s = state) {
   return a;
 }
 
+/* ---------------- 形态聚合 ---------------- */
+let _morphCache = null;
+let _morphKey = '\u0000';
+
+export function morphAgg(s = state) {
+  const key = s.morph || '';
+  if (key === _morphKey && _morphCache) return _morphCache;
+  const a = {
+    prodMult: 1, clickMult: 1, devourMult: 1, burstMult: 1, burstDurationMult: 1,
+    resoMax: RESO_MAX, resoDecayMult: 1, clickSplit: 1, resoPerDevour: 0, pulseSpeed: 1,
+  };
+  const m = key ? MORPH_BY_ID[key] : null;
+  if (m) {
+    for (const k in m.effects) {
+      const v = m.effects[k];
+      if (!(k in a)) continue;
+      if (MULT_KEYS.indexOf(k) >= 0) a[k] *= v;
+      else a[k] = v;
+    }
+  }
+  _morphCache = a;
+  _morphKey = key;
+  return a;
+}
+
+export function morphUnlocked(s = state) { return s.collapses >= MORPH_UNLOCK_COLLAPSES; }
+export function canChooseMorph(s = state) { return morphUnlocked(s) && !s.morph; }
+
+export function chooseMorph(id, s = state) {
+  if (!canChooseMorph(s)) return null;
+  const m = MORPH_BY_ID[id];
+  if (!m) return null;
+  s.morph = id;
+  s.morphAt = Date.now();
+  return m;
+}
+
+export function echoUnlocked(s = state) { return s.collapses >= ECHO_UNLOCK_COLLAPSES; }
+export function hasEcho(s = state) { return !!(s.echo && s.echo.taps && s.echo.taps.length); }
+
 export function starLevel(id, s = state) { return s.starUp[id] || 0; }
 export function achCount(s = state) { return Object.keys(s.ach).length; }
 export function totalGens(s = state) {
@@ -81,8 +129,10 @@ export function totalGens(s = state) {
 }
 
 /* ---------------- 共振节拍 ---------------- */
+export function resoMax(s = state) { return morphAgg(s).resoMax || RESO_MAX; }
+
 export function pulsePeriod(s = state) {
-  return PULSE_PERIOD / (1 + perkAgg(s).tempo);
+  return PULSE_PERIOD / ((1 + perkAgg(s).tempo) * (morphAgg(s).pulseSpeed || 1));
 }
 
 export function pulsePhase(now = Date.now(), s = state) {
@@ -116,9 +166,11 @@ export function boostMult(now = Date.now(), s = state) { return boostActive(now,
 export function burstActive(now = Date.now(), s = state) { return now < s.burstUntil; }
 export function chainActive(now = Date.now(), s = state) { return now < (s.chainUntil || 0); }
 
-export function burstDuration(s = state) { return BURST_DURATION + 1.5 * starLevel('burst', s); }
-export function boostDuration(s = state) { return BOOST_DURATION + 3 * starLevel('orb', s); }
-export function burstMult(s = state) { return BURST_MULT * perkAgg(s).burstMult; }
+export function burstDuration(s = state) {
+  return (BURST_DURATION + 1.5 * starLevel('burst', s)) * morphAgg(s).burstDurationMult;
+}
+export function boostDuration(s = state) { return 30 + 3 * starLevel('orb', s); }
+export function burstMult(s = state) { return BURST_MULT * perkAgg(s).burstMult * morphAgg(s).burstMult; }
 
 export function rawProd(s = state) {
   let sum = 0;
@@ -126,25 +178,30 @@ export function rawProd(s = state) {
   return sum;
 }
 
-export function globalMult(now = Date.now(), s = state) {
+export function globalMult(now = Date.now(), s = state, opts) {
   const a = perkAgg(s);
-  let m = 1;
-  m *= 1 + 0.25 * starLevel('resonance', s);
-  m *= 1 + ACH_BONUS * achCount(s);
-  m *= 1 + s.shards;
-  m *= 1 + Math.min(s.reso, RESO_MAX) * RESO_BONUS;
-  m *= a.prodMult;
-  m *= 1 + a.swarm * totalGens(s);
-  if (chainActive(now, s)) m *= a.chainMult;
-  if (burstActive(now, s)) m *= burstMult(s);
-  return m;
+  const m = morphAgg(s);
+  let v = 1;
+  v *= 1 + 0.25 * starLevel('resonance', s);
+  v *= 1 + ACH_BONUS * achCount(s);
+  v *= 1 + s.shards;
+  v *= 1 + Math.min(s.reso, resoMax(s)) * RESO_BONUS;
+  v *= a.prodMult;
+  // 吞噬收益走 noMorphProd 口径：噬渊的产量惩罚不该抵消它自己的吞噬加成
+  if (!opts || !opts.noMorphProd) v *= m.prodMult;
+  v *= 1 + a.swarm * totalGens(s);
+  if (chainActive(now, s)) v *= a.chainMult;
+  if (burstActive(now, s)) v *= burstMult(s);
+  return v;
 }
 
 export function eps(now = Date.now(), s = state) {
   return rawProd(s) * globalMult(now, s) * boostMult(now, s);
 }
 
-export function clickMult(s = state) { return Math.pow(1.8, starLevel('clickSync', s)); }
+export function clickMult(s = state) {
+  return Math.pow(1.8, starLevel('clickSync', s)) * morphAgg(s).clickMult;
+}
 export function comboMult(s = state) { return 1 + Math.min(s.combo, COMBO_MAX) * COMBO_STEP; }
 export function critChance(s = state) { return Math.min(0.9, CRIT_CHANCE + perkAgg(s).critChance); }
 export function critMult(s = state) { return CRIT_MULT * perkAgg(s).critMult; }
@@ -211,35 +268,50 @@ export function tap(now = Date.now(), s = state) {
   s.comboAt = now;
   if (s.combo > s.maxCombo) s.maxCombo = s.combo;
 
+  const mor = morphAgg(s);
+  const split = Math.max(1, Math.min(6, Math.floor(mor.clickSplit || 1)));
   const bursting = burstActive(now, s);
-  const perfect = bursting || isPerfect(now, s);
-  const crit = Math.random() < critChance(s);
 
-  let gain = clickGain(now, s);
-  if (perfect) gain *= PERFECT_MULT;
-  if (crit) gain *= critMult(s);
-  addEnergy(gain, s);
+  let total = 0;
+  let perfectCount = 0;
+  let anyCrit = false;
+
+  for (let i = 0; i < split; i++) {
+    const perfect = bursting || isPerfect(now, s);
+    const crit = Math.random() < critChance(s);
+    let g = clickGain(now, s);
+    if (perfect) g *= PERFECT_MULT;
+    if (crit) g *= critMult(s);
+    addEnergy(g, s);
+    total += g;
+    if (perfect) perfectCount++;
+    if (crit) anyCrit = true;
+  }
+
   s.clicks++;
-
   let echo = false;
-  if (perfect) {
-    s.perfects++;
+
+  if (perfectCount > 0) {
+    s.perfects += perfectCount;
     const a = perkAgg(s);
-    let add = 1;
+    let add = perfectCount;
     if (a.echoChance > 0 && Math.random() < a.echoChance) { add += 1; echo = true; }
-    s.reso = Math.min(RESO_MAX, s.reso + add);
+    s.reso = Math.min(resoMax(s), s.reso + add);
     if (s.reso > s.maxReso) s.maxReso = s.reso;
     s.resoAt = now;
     if (a.chainTime > 0) s.chainUntil = now + a.chainTime * 1000;
-    addCharge(CHARGE_PERFECT, s);
-  } else {
-    addCharge(CHARGE_CLICK, s);
+    addCharge(CHARGE_PERFECT * perfectCount, s);
   }
-  return { gain, perfect, crit, echo, combo: s.combo, reso: s.reso };
+  if (perfectCount < split) addCharge(CHARGE_CLICK * (split - perfectCount), s);
+  if (s.recording) recordTap(perfectCount > 0, now, s);
+
+  return { gain: total, perfect: perfectCount > 0, perfects: perfectCount, crit: anyCrit, echo, combo: s.combo, reso: s.reso, split };
 }
 
 export function devourGain(now = Date.now(), s = state) {
-  return Math.max(1, eps(now, s) * DEVOUR_BASE * perkAgg(s).devourMult);
+  const mult = perkAgg(s).devourMult * morphAgg(s).devourMult;
+  const base = rawProd(s) * globalMult(now, s, { noMorphProd: true }) * boostMult(now, s);
+  return Math.max(1, base * DEVOUR_BASE * mult);
 }
 export function devour(now = Date.now(), s = state) {
   const g = devourGain(now, s);
@@ -247,6 +319,12 @@ export function devour(now = Date.now(), s = state) {
   s.devoured++;
   s.absorbedTotal += g;
   addCharge(0.9, s);
+  const rd = morphAgg(s).resoPerDevour;
+  if (rd > 0) {
+    s.reso = Math.min(resoMax(s), s.reso + rd);
+    if (s.reso > s.maxReso) s.maxReso = s.reso;
+    s.resoAt = now;
+  }
   return g;
 }
 
@@ -258,6 +336,71 @@ export function doBurst(now = Date.now(), s = state) {
   s.bursts++;
   s.burstUntil = now + dur * 1000;
   return { duration: dur, mult: burstMult(s) };
+}
+
+/* ---------------- 残响录制 ---------------- */
+export function startRecord(now = Date.now(), s = state) {
+  if (!echoUnlocked(s)) return null;
+  s.recording = true;
+  s.recordStart = now;
+  s.recordBuf = [];
+  s.recordLen = RECORD_LEN;
+  return RECORD_LEN;
+}
+export function recordProgress(now = Date.now(), s = state) {
+  if (!s.recording) return 0;
+  return Math.max(0, 1 - (now - s.recordStart) / (s.recordLen * 1000));
+}
+function recordTap(perfect, now, s) {
+  if (!s.recording) return;
+  const t = (now - s.recordStart) / 1000;
+  if (t < 0 || t > s.recordLen) return;
+  if (s.recordBuf.length >= ECHO_MAX_TAPS) return;
+  s.recordBuf.push({ t: Math.round(t * 100) / 100, perfect: !!perfect });
+}
+export function finishRecord(now = Date.now(), s = state) {
+  if (!s.recording) return null;
+  s.recording = false;
+  const taps = (s.recordBuf || []).slice().sort((a, b) => a.t - b.t);
+  const rate = taps.length ? taps.filter(t => t.perfect).length / taps.length : 0;
+  s.echo = { taps, len: Math.max(1, s.recordLen), rate };
+  s.recordBuf = [];
+  s.echoAcc = 0;
+  s.echoIdx = 0;
+  return s.echo;
+}
+export function clearEcho(s = state) {
+  s.echo = null;
+  s.echoAcc = 0;
+  s.echoIdx = 0;
+  return true;
+}
+
+// 残响自动演奏：把自己录下的操作循环重放
+export function echoTick(dt, now = Date.now(), s = state) {
+  const e = s.echo;
+  if (!e || !e.taps || e.taps.length === 0) return 0;
+  let total = 0;
+  s.echoAcc = (s.echoAcc || 0) + dt;
+  let guard = 0;
+  while (s.echoIdx < e.taps.length && e.taps[s.echoIdx].t <= s.echoAcc && guard++ < 200) {
+    const t = e.taps[s.echoIdx++];
+    let g = clickPower(now, s) * ECHO_RATE;
+    if (t.perfect) g *= PERFECT_MULT;
+    addEnergy(g, s);
+    total += g;
+    s.echoHits = (s.echoHits || 0) + 1;
+    if (t.perfect) {
+      s.reso = Math.min(resoMax(s), s.reso + 1);
+      s.resoAt = now;
+    }
+  }
+  if (s.echoAcc >= e.len) {
+    s.echoAcc -= e.len;
+    if (s.echoAcc < 0) s.echoAcc = 0;
+    s.echoIdx = 0;
+  }
+  return total;
 }
 
 export function buyGen(i, amount = 1, s = state) {
@@ -296,7 +439,9 @@ export function startEnergy(s = state) {
 export function perkSlots(s = state) { return 2 + starLevel('slots', s); }
 
 export function rollPerkChoices(s = state, n = 3) {
-  const avail = PERKS.filter(p => !s.perks.includes(p.id) && !s.perkChoices.includes(p.id));
+  const taken = s.perks || [];
+  const cur = s.perkChoices || [];
+  const avail = PERKS.filter(p => taken.indexOf(p.id) < 0 && cur.indexOf(p.id) < 0);
   const out = [];
   while (out.length < n && avail.length) {
     const total = avail.reduce((a, p) => a + RARE_WEIGHT[p.rare], 0);
@@ -313,7 +458,7 @@ export function rollPerkChoices(s = state, n = 3) {
 }
 
 export function ensureChoices(s = state) {
-  if (s.perkPicksLeft > 0 && s.perkChoices.length === 0) {
+  if (s.perkPicksLeft > 0 && (!s.perkChoices || s.perkChoices.length === 0)) {
     s.perkChoices = rollPerkChoices(s);
   }
   return s.perkChoices;
@@ -321,13 +466,12 @@ export function ensureChoices(s = state) {
 
 export function pickPerk(id, s = state) {
   if (s.perkPicksLeft <= 0) return null;
-  const i = s.perkChoices.indexOf(id);
-  if (i < 0) return null;
+  if (!s.perkChoices || s.perkChoices.indexOf(id) < 0) return null;
   s.perks.push(id);
   s.perksTaken++;
   s.perkPicksLeft--;
   s.perkChoices = [];
-  return { id, left: s.perkPicksLeft };
+  return { id, left: s.perkPicksLeft, perk: PERK_BY_ID[id] || null };
 }
 
 export function rerollCost(s = state) { return Math.floor(REROLL_COST * Math.pow(1.7, s.rerolls || 0)); }
@@ -376,6 +520,8 @@ function resetRun(s) {
   s.charge = 0;
   s.burstUntil = 0;
   s.chainUntil = 0;
+  s.echoAcc = 0;
+  s.echoIdx = 0;
 }
 
 export function shardGain(s = state) {
@@ -391,13 +537,14 @@ export function doSingularity(now = Date.now(), s = state) {
   s.totalStardust = 0;
   s.starUp = {};
   s.autoBuy = false;
+  s.morph = null;          // 飞升后可重选形态
   resetRun(s);
   s.perks = [];
   s.perkChoices = [];
   s.perkPicksLeft = perkSlots(s);
   s.rerolls = 0;
   s.pulseStart = now;
-  return { gain, picks: s.perkPicksLeft };
+  return { gain, picks: s.perkPicksLeft, morphReset: true };
 }
 
 export function checkAchievements(s = state) {
@@ -435,10 +582,13 @@ export function tick(dt, now = Date.now(), s = state) {
   const ac = starLevel('autoClick', s) + perkAgg(s).autoClick;
   if (ac > 0) addEnergy(clickPower(now, s) * ac * d, s);
 
-  addCharge(d * (0.9 + 0.06 * Math.min(s.reso, RESO_MAX)), s);
+  echoTick(d, now, s);
 
-  if (s.reso > 0 && now - s.resoAt > RESO_DECAY * 1000) {
-    s.resoDecayAcc += dt;
+  addCharge(d * (0.9 + 0.06 * Math.min(s.reso, resoMax(s))), s);
+
+  const decay = morphAgg(s).resoDecayMult;
+  if (decay !== 0 && s.reso > 0 && now - s.resoAt > RESO_DECAY * 1000) {
+    s.resoDecayAcc += dt * decay;
     if (s.resoDecayAcc >= 0.55) { s.resoDecayAcc = 0; s.reso--; }
   } else {
     s.resoDecayAcc = 0;
@@ -471,7 +621,7 @@ export function save(now = Date.now(), s = state) {
 
 const NUM_KEYS = ['energy', 'totalRun', 'totalAll', 'clicks', 'perfects', 'devoured', 'absorbedTotal',
   'combo', 'maxCombo', 'reso', 'maxReso', 'charge', 'stardust', 'totalStardust', 'shards', 'totalShards',
-  'collapses', 'orbsTapped', 'bursts', 'playTime', 'perksTaken', 'perkPicksLeft', 'rerolls'];
+  'collapses', 'orbsTapped', 'bursts', 'playTime', 'perksTaken', 'perkPicksLeft', 'rerolls', 'echoHits'];
 
 // 必须返回新对象：Object.assign(data, base, data) 会让默认值反向覆盖存档
 export function normalize(data) {
@@ -490,6 +640,23 @@ export function normalize(data) {
   s.perks = Array.isArray(s.perks) ? s.perks.filter(validPerk).slice(0, 12) : [];
   s.perkChoices = Array.isArray(s.perkChoices) ? s.perkChoices.filter(validPerk) : [];
   if (typeof s.perkPicksLeft !== 'number' || !Number.isFinite(s.perkPicksLeft) || s.perkPicksLeft < 0) s.perkPicksLeft = 0;
+
+  if (s.morph && !MORPH_BY_ID[s.morph]) s.morph = null;
+
+  if (s.echo && typeof s.echo === 'object' && Array.isArray(s.echo.taps)) {
+    s.echo.taps = s.echo.taps
+      .filter(t => t && typeof t.t === 'number' && Number.isFinite(t.t) && t.t >= 0)
+      .slice(0, ECHO_MAX_TAPS);
+    if (typeof s.echo.len !== 'number' || !Number.isFinite(s.echo.len) || s.echo.len <= 0) s.echo.len = RECORD_LEN;
+    if (typeof s.echo.rate !== 'number' || !Number.isFinite(s.echo.rate)) s.echo.rate = 0;
+  } else {
+    s.echo = null;
+  }
+  if (typeof s.echoAcc !== 'number' || !Number.isFinite(s.echoAcc) || s.echoAcc < 0) s.echoAcc = 0;
+  if (typeof s.echoIdx !== 'number' || !Number.isFinite(s.echoIdx) || s.echoIdx < 0) s.echoIdx = 0;
+  s.recording = false;
+  s.recordBuf = [];
+  s.recordLen = RECORD_LEN;
 
   for (const k of NUM_KEYS) {
     if (typeof s[k] !== 'number' || !Number.isFinite(s[k]) || s[k] < 0) s[k] = 0;

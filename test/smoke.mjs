@@ -1,7 +1,7 @@
 // 核心逻辑冒烟测试：node test/smoke.mjs
 import assert from 'node:assert/strict';
 import * as core from '../js/core.js';
-import { GENERATORS, STAR_UPGRADES, PERKS, ACHIEVEMENTS, COLLAPSE_REQUIRE, SINGULARITY_REQUIRE, PERFECT_MULT, RESO_MAX } from '../js/data.js';
+import { GENERATORS, STAR_UPGRADES, PERKS, ACHIEVEMENTS, MORPHS, COLLAPSE_REQUIRE, SINGULARITY_REQUIRE, PERFECT_MULT, RESO_MAX } from '../js/data.js';
 import { format, parseNum } from '../js/util.js';
 
 let pass = 0;
@@ -342,6 +342,130 @@ ok('配置表规模正确', () => {
   assert.equal(STAR_UPGRADES.length, 11);
   assert.equal(PERKS.length, 15);
   assert.ok(ACHIEVEMENTS.length >= 30);
+});
+
+console.log('\n[9] 核心形态');
+ok('未解锁时不能选形态', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  assert.equal(core.morphUnlocked(s), false);
+  assert.equal(core.chooseMorph('prism', s), null);
+  assert.equal(s.morph, null);
+});
+ok('坍缩后解锁，且本世只能选一次', () => {
+  const s = core.state;
+  s.collapses = 1;
+  assert.equal(core.morphUnlocked(s), true);
+  assert.ok(core.chooseMorph('prism', s));
+  assert.equal(s.morph, 'prism');
+  assert.equal(core.chooseMorph('maw', s), null);
+});
+ok('棱镜：一击三判 + 单段打折 + 上限 30', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  s.collapses = 1;
+  s.gens[0] = 20;
+  const base = core.clickPower(Date.now(), s);
+  core.chooseMorph('prism', s);
+  assert.equal(core.morphAgg(s).clickSplit, 3);
+  assert.ok(core.clickPower(Date.now(), s) < base, '单段收益应打折');
+  assert.equal(core.resoMax(s), 30);
+  s.pulseStart = 7000000;
+  const t = 7000000 + Math.floor(1750 * 0.95);
+  const before = s.reso;
+  core.tap(t, s);
+  assert.ok(s.reso - before >= 1, '完美段位应叠共振');
+});
+ok('噬渊：吞噬 ×12 且每次叠共振', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  s.collapses = 1;
+  s.gens[0] = 100;
+  const g0 = core.devourGain(Date.now(), s);
+  core.chooseMorph('maw', s);
+  const g1 = core.devourGain(Date.now(), s);
+  assert.ok(Math.abs(g1 / g0 - 12) < 1e-6);
+  s.reso = 0;
+  core.devour(Date.now(), s);
+  assert.equal(s.reso, 1);
+});
+ok('螺旋：共振不衰减', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  s.collapses = 1;
+  core.chooseMorph('spiral', s);
+  s.reso = 10;
+  s.resoAt = 0;
+  core.tick(5, 999999, s);
+  assert.equal(s.reso, 10);
+});
+ok('脉冲星：爆发 ×2 时长 / ×3 倍率 / 脉动更快', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  s.collapses = 1;
+  const d0 = core.burstDuration(s);
+  const m0 = core.burstMult(s);
+  core.chooseMorph('pulsar', s);
+  assert.ok(Math.abs(core.burstDuration(s) / d0 - 2) < 1e-9);
+  assert.ok(Math.abs(core.burstMult(s) / m0 - 3) < 1e-9);
+  assert.ok(core.pulsePeriod(s) < 1.75);
+});
+ok('飞升后可重选形态', () => {
+  const s = core.state;
+  s.totalStardust = SINGULARITY_REQUIRE;
+  assert.ok(core.doSingularity(Date.now(), s));
+  assert.equal(s.morph, null);
+  s.collapses = 2;
+  assert.ok(core.chooseMorph('maw', s));
+});
+
+console.log('\n[10] 残响录制');
+ok('坍缩 2 次前不能录制', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  assert.equal(core.echoUnlocked(s), false);
+  assert.equal(core.startRecord(1000, s), null);
+});
+ok('录制 → 完成 → 生成残响', () => {
+  const s = core.state;
+  s.collapses = 2;
+  assert.ok(core.startRecord(1000, s) > 0);
+  core.tap(1100, s);
+  core.tap(1600, s);
+  core.tap(2300, s);
+  assert.equal(s.recording, true);
+  const e = core.finishRecord(5200, s);
+  assert.ok(e);
+  assert.equal(s.recording, false);
+  assert.equal(e.taps.length, 3);
+  assert.ok(e.len >= 1);
+  assert.ok(e.rate >= 0 && e.rate <= 1);
+});
+ok('残响循环演奏并产生收益', () => {
+  const s = core.state;
+  s.gens[0] = 30;
+  const before = s.energy;
+  let got = 0;
+  for (let i = 0; i < 60; i++) got += core.echoTick(0.1, Date.now(), s);
+  assert.ok(got > 0);
+  assert.ok(s.energy > before);
+  assert.ok(s.echoHits >= 3);
+});
+ok('清除残响', () => {
+  const s = core.state;
+  core.clearEcho(s);
+  assert.equal(core.hasEcho(s), false);
+  assert.equal(core.echoTick(0.1, Date.now(), s), 0);
+});
+ok('存档清洗非法形态与残响', () => {
+  const bad = core.normalize({ morph: 'nope', echo: { taps: [{ t: 1, perfect: true }, { t: -5 }], len: 0 } });
+  assert.equal(bad.morph, null);
+  assert.equal(bad.echo.taps.length, 1);
+  assert.equal(bad.echo.len, 4);
+});
+ok('形态表完整', () => {
+  assert.equal(MORPHS.length, 4);
+  assert.equal(new Set(MORPHS.map(m => m.id)).size, 4);
 });
 
 console.log('\n通过 ' + pass + ' 项检查' + (process.exitCode ? '（存在失败）' : '，全部正常') + '\n');

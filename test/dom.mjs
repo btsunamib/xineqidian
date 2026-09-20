@@ -71,6 +71,7 @@ const click = el => el.dispatchEvent(new w.MouseEvent('click', { bubbles: true, 
 console.log('\n[DOM-1] 启动与首屏');
 const core = await import('../js/core.js');
 const fx = await import('../js/fx.js');
+const ui = await import('../js/ui.js');
 await import('../js/main.js');
 await sleep(1400);
 
@@ -221,6 +222,68 @@ await ok('词条面板显示已装备', () => {
   click(w.document.querySelector('#tabs button[data-view="perk"]'));
   assert.ok($('perkList').querySelectorAll('.card').length >= 2, '应显示 2 个已装备词条');
   assert.ok($('perkCodex').querySelectorAll('span.owned').length >= 2);
+});
+
+console.log('\n[DOM-6] 词条选择（回归测试）');
+await ok('抽卡卡片是 button 且能点选', () => {
+  core.state.perkChoices = [];
+  core.state.perkPicksLeft = 1;
+  ui.showDraft();
+  const cards = w.document.querySelectorAll('.draft-card');
+  assert.equal(cards.length, 3);
+  assert.equal(cards[0].tagName, 'BUTTON');
+  const before = core.state.perks.length;
+  click(cards[0]);
+  assert.equal(core.state.perks.length, before + 1);
+  assert.equal(core.state.perkPicksLeft, 0);
+  assert.ok($('modal').classList.contains('hidden'));
+});
+await ok('点卡片内部子元素也能选中（事件委托）', () => {
+  core.state.perkChoices = [];
+  core.state.perkPicksLeft = 1;
+  ui.showDraft();
+  const inner = w.document.querySelector('.draft-card .dn');
+  assert.ok(inner, '卡片内部结构应存在');
+  const before = core.state.perks.length;
+  click(inner);
+  assert.equal(core.state.perks.length, before + 1);
+  assert.equal(core.state.perkPicksLeft, 0);
+});
+await ok('跳过按钮可用', () => {
+  core.state.perkChoices = [];
+  core.state.perkPicksLeft = 1;
+  ui.showDraft();
+  const s0 = core.state.stardust;
+  click($('draftSkip'));
+  assert.equal(core.state.perkPicksLeft, 0);
+  assert.equal(core.state.stardust, s0 + 1);
+});
+
+console.log('\n[DOM-7] 形态与残响');
+await ok('坍缩后形态卡解锁并可选', () => {
+  core.state.collapses = Math.max(core.state.collapses, 1);
+  core.state.morph = null;
+  ui.renderAll();
+  const cards = w.document.querySelectorAll('.morph-card');
+  assert.equal(cards.length, 4);
+  assert.ok(!cards[0].classList.contains('locked'), '已解锁不应显示锁定');
+  click(cards[1]);
+  assert.ok(!$('modal').classList.contains('hidden'), '应弹出确认框');
+  click($('modalActions').querySelector('.pri'));
+  assert.ok(core.state.morph, '形态应已选定');
+});
+await ok('残响按钮在坍缩 2 次后可用并可开始录制', () => {
+  core.state.collapses = 2;
+  ui.renderAll();
+  assert.equal($('recordBtn').disabled, false);
+  click($('recordBtn'));
+  assert.equal(core.state.recording, true);
+});
+await ok('清理录制状态后按钮恢复', () => {
+  core.state.recording = false;
+  core.state.recordBuf = [];
+  ui.renderAll();
+  assert.equal($('recordBtn').disabled, false);
 });
 
 console.log('\n通过 ' + pass + ' 项 DOM 检查' + (fail ? '（' + fail + ' 项失败）' : '，全部正常') + '\n');

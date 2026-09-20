@@ -477,6 +477,8 @@ function drawCore(s, now, ph, pWin, bursting, boost) {
   ctx.fill();
   ctx.globalAlpha = 1;
 
+  drawMorphShape(core.state.morph, cx, cy, R, now, bursting);
+
   // 爆发射线
   if (bursting) {
     const raysN = 12;
@@ -533,6 +535,90 @@ function drawSparks(dt) {
 function hexToRgb(hex) {
   const h = hex.replace('#', '');
   return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
+// 形态专属外观：每种核心形态长得完全不同
+function drawMorphShape(morph, x, y, R, now, bursting) {
+  if (morph === 'prism') {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(now / 2600);
+    ctx.beginPath();
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2;
+      const px = Math.cos(a) * R * 1.62;
+      const py = Math.sin(a) * R * 1.62;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = 'rgba(179,157,255,0.6)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2 + now / 2600;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * R, Math.sin(a) * R);
+      ctx.lineTo(Math.cos(a) * R * 3.6, Math.sin(a) * R * 3.6);
+      ctx.strokeStyle = 'rgba(210,190,255,0.20)';
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+    }
+    ctx.restore();
+    return;
+  }
+
+  if (morph === 'maw') {
+    const teeth = 15;
+    for (let i = 0; i < teeth; i++) {
+      const a = (i / teeth) * Math.PI * 2 + now / 2200;
+      const r0 = R * 1.04;
+      const r1 = R * (1.34 + 0.10 * Math.sin(now / 260 + i));
+      ctx.beginPath();
+      ctx.moveTo(x + Math.cos(a - 0.10) * r0, y + Math.sin(a - 0.10) * r0);
+      ctx.lineTo(x + Math.cos(a) * r1, y + Math.sin(a) * r1);
+      ctx.lineTo(x + Math.cos(a + 0.10) * r0, y + Math.sin(a + 0.10) * r0);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(255,106,213,' + (bursting ? 0.6 : 0.42) + ')';
+      ctx.fill();
+    }
+    return;
+  }
+
+  if (morph === 'pulsar') {
+    for (let b = 0; b < 2; b++) {
+      const a = now / 700 + b * Math.PI;
+      const len = R * 6.5;
+      const spread = 0.15;
+      const grad = ctx.createLinearGradient(x, y, x + Math.cos(a) * len, y + Math.sin(a) * len);
+      grad.addColorStop(0, 'rgba(255,204,77,0.42)');
+      grad.addColorStop(1, 'rgba(255,204,77,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + Math.cos(a - spread) * len, y + Math.sin(a - spread) * len);
+      ctx.lineTo(x + Math.cos(a + spread) * len, y + Math.sin(a + spread) * len);
+      ctx.closePath();
+      ctx.fill();
+    }
+    return;
+  }
+
+  // 螺旋 / 未选形态：两条旋转螺旋臂
+  const arms = morph === 'spiral' ? 3 : 2;
+  for (let arm = 0; arm < arms; arm++) {
+    ctx.beginPath();
+    for (let i = 0; i <= 26; i++) {
+      const t = i / 26;
+      const ang = now / 950 + (arm / arms) * Math.PI * 2 + t * 3.4;
+      const rr = R * (1.05 + t * 2.3);
+      const px = x + Math.cos(ang) * rr;
+      const py = y + Math.sin(ang) * rr * 0.42;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.strokeStyle = morph === 'spiral' ? 'rgba(110,231,255,0.42)' : 'rgba(120,190,255,0.22)';
+    ctx.lineWidth = morph === 'spiral' ? 2.4 : 1.8;
+    ctx.stroke();
+  }
 }
 
 export function confettiBurst() {
