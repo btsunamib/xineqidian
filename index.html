@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#05070f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="description" content="吸能奇点 —— 一款手机友好的爽快增量放置游戏。点击吸能、连击暴击、黄金粒子、坍缩转生、奇点飞升。">
+<title>吸能奇点 · 增量进化</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌀</text></svg>">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<canvas id="fx" aria-hidden="true"></canvas>
+
+<div id="app">
+
+  <header id="topbar">
+    <div class="tb-left">
+      <div class="tb-label">能量</div>
+      <div class="tb-value"><span id="energy">0</span><span class="tb-unit" id="energyUnit"></span></div>
+    </div>
+    <div class="tb-right">
+      <div class="tb-chip" id="chipEps">+0 /s</div>
+      <div class="tb-chip gold" id="chipStar">✦ 0</div>
+    </div>
+  </header>
+
+  <section id="tapzone">
+    <div class="orb-wrap">
+      <div class="ring r1"></div>
+      <div class="ring r2"></div>
+      <div class="ring r3"></div>
+      <button id="orb" aria-label="点击吸能">
+        <span class="orb-core"></span>
+        <span class="orb-face">点击吸能</span>
+      </button>
+      <div id="boostTag" class="boost-tag hidden"></div>
+    </div>
+
+    <div id="comboWrap">
+      <div id="comboBar"><i id="comboFill"></i></div>
+      <div id="comboText">连击 0 · ×1.00</div>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat"><span class="s-label">点击力</span><span class="s-val" id="statClick">1</span></div>
+      <div class="stat"><span class="s-label">总产出</span><span class="s-val" id="statEps">0/s</span></div>
+      <div class="stat"><span class="s-label">全局倍率</span><span class="s-val" id="statMult">×1.00</span></div>
+    </div>
+  </section>
+
+  <main id="views">
+
+    <section class="view active" id="view-gen">
+      <div class="view-head">
+        <div class="bulk" id="bulk">
+          <button data-bulk="1" class="on">×1</button>
+          <button data-bulk="10">×10</button>
+          <button data-bulk="100">×100</button>
+          <button data-bulk="max">MAX</button>
+        </div>
+        <label class="switch"><input type="checkbox" id="autoBuyToggle"><span>自动买</span></label>
+      </div>
+      <div id="genList" class="list"></div>
+    </section>
+
+    <section class="view" id="view-star">
+      <div class="star-head">
+        <div class="star-line"><span>✦ 星尘</span><b id="starAmount">0</b></div>
+        <div class="star-line sub"><span>本次可坍缩获得</span><b id="starGain">0</b></div>
+        <button id="collapseBtn" class="big-btn">坍缩重启</button>
+        <div class="hint" id="collapseHint">累计 1e12 能量后解锁坍缩</div>
+      </div>
+      <div id="starList" class="list"></div>
+      <div class="singularity">
+        <div class="sg-title">🕳️ 奇点飞升</div>
+        <div class="sg-sub" id="sgInfo">永久碎片 0 · 每片 +100% 产量 / +10% 速度</div>
+        <div class="sg-sub" id="sgGain">需要 20万 累计星尘</div>
+        <button id="sgBtn" class="big-btn dark">飞升奇点</button>
+      </div>
+    </section>
+
+    <section class="view" id="view-ach">
+      <div class="ach-head">成就 <b id="achCount">0/0</b> · 每个 +2% 全局产量</div>
+      <div id="achList" class="ach-grid"></div>
+    </section>
+
+    <section class="view" id="view-set">
+      <div class="set-block">
+        <div class="set-title">存档</div>
+        <button class="big-btn" id="exportBtn">导出存档</button>
+        <button class="big-btn" id="importBtn">导入存档</button>
+        <button class="big-btn danger" id="resetBtn">彻底重置</button>
+        <div class="hint" id="saveInfo">自动保存中</div>
+      </div>
+      <div class="set-block">
+        <div class="set-title">体验</div>
+        <label class="switch wide"><input type="checkbox" id="hapticsToggle" checked><span>震动反馈</span></label>
+        <label class="switch wide"><input type="checkbox" id="fxToggle" checked><span>粒子特效</span></label>
+        <div class="hint">数据保存在本机浏览器。清除浏览器数据会丢失存档，建议定期导出。</div>
+      </div>
+      <div class="set-block">
+        <div class="set-title">统计</div>
+        <div id="statList" class="statlist"></div>
+      </div>
+      <div class="set-block about">
+        <div class="set-title">吸能奇点</div>
+        <div class="hint">v1.0.0 · 纯前端增量游戏 · 支持离线收益</div>
+      </div>
+    </section>
+
+  </main>
+
+  <nav id="tabs">
+    <button data-view="gen" class="on"><i>⚛️</i><span>进化</span></button>
+    <button data-view="star"><i>✦</i><span>星尘</span></button>
+    <button data-view="ach"><i>🏆</i><span>成就</span></button>
+    <button data-view="set"><i>⚙️</i><span>设置</span></button>
+  </nav>
+
+</div>
+
+<div id="toasts"></div>
+
+<div id="modal" class="hidden">
+  <div class="modal-box">
+    <div class="modal-title" id="modalTitle">提示</div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-actions" id="modalActions"></div>
+  </div>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
