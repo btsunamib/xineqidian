@@ -286,5 +286,48 @@ await ok('清理录制状态后按钮恢复', () => {
   assert.equal($('recordBtn').disabled, false);
 });
 
+console.log('\n[DOM-8] 弹窗可关闭 / CSS 兜底');
+await ok('CSS 中必须有 .hidden 规则（否则 #modal 会常驻屏幕）', () => {
+  const css = fs.readFileSync(path.join(root, 'css/style.css'), 'utf8');
+  assert.ok(/\.hidden\s*\{[^}]*display\s*:\s*none/.test(css),
+    'css/style.css 缺少 .hidden{display:none} —— #modal 自带 display:grid，会变成一个关不掉的空提示框');
+});
+await ok('hideModal 会同时写内联样式', () => {
+  ui.hideModal();
+  const m = $('modal');
+  assert.ok(m.classList.contains('hidden'));
+  assert.equal(m.style.display, 'none');
+});
+await ok('抽卡弹窗可关闭，且不会自动弹回', async () => {
+  core.state.perkChoices = [];
+  core.state.perkPicksLeft = 1;
+  ui.showDraft(true);
+  assert.ok(!$('modal').classList.contains('hidden'));
+  assert.equal($('modal').style.display, 'grid');
+  assert.ok(!$('modalClose').classList.contains('hidden'), '关闭按钮应可见');
+  click($('modalClose'));
+  assert.ok($('modal').classList.contains('hidden'));
+  assert.equal($('modal').style.display, 'none');
+  await sleep(400);
+  assert.ok($('modal').classList.contains('hidden'), '关掉后不应自己弹回来');
+});
+await ok('兜底入口可重新打开，「稍后」不消耗次数', () => {
+  click($('pickPerkBtn'));
+  assert.ok(!$('modal').classList.contains('hidden'), '兜底按钮应能打开抽卡');
+  assert.equal(w.document.querySelectorAll('.draft-card').length, 3);
+  const left = core.state.perkPicksLeft;
+  click($('draftLater'));
+  assert.ok($('modal').classList.contains('hidden'));
+  assert.equal(core.state.perkPicksLeft, left, '稍后不应消耗选择次数');
+});
+await ok('强制确认型弹窗（坍缩）仍然没有 ✕', () => {
+  core.state.totalRun = 1e12;
+  click($('collapseBtn'));
+  assert.ok(!$('modal').classList.contains('hidden'));
+  assert.ok($('modalClose').classList.contains('hidden'), '确认弹窗不应出现 ✕');
+  click($('modalActions').querySelector('button'));
+  assert.ok($('modal').classList.contains('hidden'));
+});
+
 console.log('\n通过 ' + pass + ' 项 DOM 检查' + (fail ? '（' + fail + ' 项失败）' : '，全部正常') + '\n');
 process.exit(process.exitCode || 0);

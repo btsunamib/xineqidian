@@ -26,6 +26,8 @@ let lastSweep = null;
 let draftArmedAt = 0;
 let draftQueued = false;
 let draftBound = false;
+let draftDismissed = false;
+let modalOnClose = null;
 let lastList = 0;
 let lastAch = 0;
 let lastAutoBuy = 0;
@@ -97,10 +99,16 @@ function wire() {
   });
 
   $('burstBtn').addEventListener('click', doBurst);
-  $('pickPerkBtn').addEventListener('click', () => showDraft());
+  $('pickPerkBtn').addEventListener('click', () => showDraft(true));
   $('recordBtn').addEventListener('click', onRecord);
   $('clearEchoBtn').addEventListener('click', onClearEcho);
   $('morphList').addEventListener('click', onMorphClick);
+
+  // 弹窗关闭：右上角 ✕ / 点背景 / Esc（只对允许关闭的弹窗生效）
+  const mc = $('modalClose');
+  if (mc) mc.addEventListener('click', closeModalByUser);
+  $('modal').addEventListener('click', ev => { if (ev.target === $('modal')) closeModalByUser(); });
+  document.addEventListener('keydown', ev => { if (ev.key === 'Escape') closeModalByUser(); });
 
   const ab = $('autoBuyToggle');
   ab.addEventListener('change', () => {
@@ -333,10 +341,11 @@ function switchView(v) {
 }
 
 /* ---------------- 词条抽卡 ---------------- */
-export function showDraft() {
+export function showDraft(force) {
+  if (force) draftDismissed = false;
   if (inDraft) return;
   const choices = core.ensureChoices(core.state);
-  if (!choices.length) return;
+  if (!choices.length) { core.state.perkPicksLeft = 0; return; }
   inDraft = true;
   const s = core.state;
   const cards = choices.map(id => {
@@ -357,8 +366,9 @@ export function showDraft() {
     '<div class="draft-foot">' +
       '<button type="button" id="draftReroll"' + (s.stardust < rc ? ' disabled' : '') + '>重抽 ✦' + format(rc) + '</button>' +
       '<button type="button" id="draftSkip">跳过 +✦1</button>' +
+      '<button type="button" id="draftLater">稍后</button>' +
     '</div>';
-  showModal('奇点词条', body, [], true);
+  showModal('奇点词条', body, [], false, () => dismissDraft(true));
 
   const box = $('modalBody');
   if (!draftBound) {
@@ -369,6 +379,8 @@ export function showDraft() {
   if (rb) rb.addEventListener('click', onDraftReroll);
   const sb = $('draftSkip');
   if (sb) sb.addEventListener('click', onDraftSkip);
+  const lb = $('draftLater');
+  if (lb) lb.addEventListener('click', onDraftLater);
 }
 
 function onDraftClick(ev) {
@@ -411,6 +423,20 @@ function onDraftSkip(ev) {
   else core.save();
 }
 
+// 收起抽卡：保留未用完的次数，之后可从「词条」页重新打开
+function dismissDraft(alreadyHidden) {
+  inDraft = false;
+  draftDismissed = true;
+  if (!alreadyHidden) hideModal();
+  updateLists(Date.now(), true);
+  toast('已收起 · 可在「词条」页随时选择', 'violet');
+}
+
+function onDraftLater(ev) {
+  if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+  dismissDraft(false);
+}
+
 /* ---------------- 转生 ---------------- */
 function confirmCollapse() {
   const gain = core.stardustGain(core.state);
@@ -432,7 +458,8 @@ function confirmCollapse() {
         core.save();
         renderAll();
         inDraft = false;
-        setTimeout(showDraft, 420);
+        draftDismissed = false;
+        setTimeout(() => showDraft(true), 420);
       } },
     ], true);
 }
@@ -458,7 +485,8 @@ function confirmSingularity() {
         core.save();
         renderAll();
         inDraft = false;
-        setTimeout(showDraft, 420);
+        draftDismissed = false;
+        setTimeout(() => showDraft(true), 420);
       } },
     ], true);
 }
@@ -635,7 +663,7 @@ export function hud(now) {
   if (s.autoBuy && now - lastAutoBuy > 250) { lastAutoBuy = now; core.autoBuyTick(s); }
 
 // 词条抽卡（只排队一次，避免重复触发与互相覆盖）
-  if (!inDraft && !draftQueued && s.perkPicksLeft > 0 && now > draftArmedAt && $('modal').classList.contains('hidden')) {
+  if (!inDraft && !draftQueued && !draftDismissed && s.perkPicksLeft > 0 && now > draftArmedAt && $('modal').classList.contains('hidden')) {
     draftQueued = true;
     setTimeout(() => {
       draftQueued = false;
@@ -742,6 +770,12 @@ function renderPerkPanel() {
   const s = core.state;
   const slots = core.perkSlots(s);
   $('perkSlotInfo').textContent = s.perks.length + '/' + slots + (s.perkPicksLeft > 0 ? ' · 待选 ' + s.perkPicksLeft : '');
+  const pb = $('pickPerkBtn');
+  if (pb) {
+    const pending = s.perkPicksLeft > 0;
+    pb.classList.toggle('hidden', !pending);
+    pb.textContent = '选择词条（剩 ' + s.perkPicksLeft + ' 次）';
+  }
   const box = $('perkList');
   if (!s.perks.length) {
     box.innerHTML = '<div class="panel"><div class="hint">本轮还没有词条。坍缩后会出现 3 选 1 的抽卡。</div></div>';
@@ -927,7 +961,7 @@ export function toast(text, cls) {
   while (box.children.length > 4) box.removeChild(box.firstChild);
 }
 
-export function showModal(title, body, actions, locked) {
+export function showModal(title, body, actions, locked, onClose) {
   const m = $('modal');
   $('modalTitle').textContent = title;
   $('modalBody').innerHTML = body;
@@ -944,12 +978,31 @@ export function showModal(title, body, actions, locked) {
     box.appendChild(b);
   });
   box.style.display = (actions && actions.length) ? 'flex' : 'none';
+
+  // 只有「允许关闭」的弹窗才挂 ✕ / 背景 / Esc 关闭
+  modalOnClose = (!locked && typeof onClose === 'function') ? onClose : null;
+  const cb = $('modalClose');
+  if (cb) cb.classList.toggle('hidden', !modalOnClose);
+
   m.classList.remove('hidden');
+  m.style.display = 'grid';           // 内联样式兜底，CSS 出问题也不会卡住
   m.dataset.locked = locked ? '1' : '';
 }
 
 export function hideModal() {
-  $('modal').classList.add('hidden');
+  const m = $('modal');
+  m.classList.add('hidden');
+  m.style.display = 'none';
+  modalOnClose = null;
+}
+
+function closeModalByUser() {
+  const m = $('modal');
+  if (!m || m.classList.contains('hidden')) return;
+  const f = modalOnClose;
+  if (!f) return;                    // 强制确认型弹窗只能走按钮
+  hideModal();
+  f();
 }
 
 export function modalOpen() {

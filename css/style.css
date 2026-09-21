@@ -16,6 +16,9 @@
   --safe-t:env(safe-area-inset-top,0px);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+/* 关键规则：所有靠 .hidden 收起的元素（弹窗 / 标签 / 按钮）必须真的不显示。
+   之前这条丢了，导致 #modal 自带 display:grid 一直露在外面，变成一个关不掉的空提示框。 */
+.hidden{display:none!important}
 html,body{height:100%}
 body{
   margin:0;background:var(--bg);color:var(--txt);
@@ -217,9 +220,15 @@ body::before{
 
 #modal{position:fixed;inset:0;z-index:70;background:rgba(3,5,12,.78);backdrop-filter:blur(7px);
   display:grid;place-items:center;padding:18px}
-.modal-box{width:100%;max-width:400px;background:linear-gradient(160deg,#141a30,#0a0e20);
+.modal-box{position:relative;width:100%;max-width:400px;background:linear-gradient(160deg,#141a30,#0a0e20);
   border:1px solid var(--line2);border-radius:20px;padding:17px;box-shadow:0 22px 64px rgba(0,0,0,.65);
   animation:toastIn .22s ease;max-height:88vh;overflow:auto}
+.modal-close{position:absolute;top:10px;right:10px;width:34px;height:34px;border-radius:50%;
+  border:1px solid var(--line);background:rgba(255,255,255,.08);color:var(--txt);
+  font-size:15px;font-weight:900;line-height:1;cursor:pointer;font-family:inherit;padding:0;
+  display:grid;place-items:center;z-index:2}
+.modal-close:active{transform:scale(.93)}
+.modal-close.hidden{display:none!important}
 .modal-title{font-size:16px;font-weight:900;margin-bottom:10px}
 .modal-body{font-size:12.5px;color:var(--dim);line-height:1.65;word-break:break-word}
 .modal-body b{color:var(--gold)}
