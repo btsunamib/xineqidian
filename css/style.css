@@ -195,7 +195,7 @@ body::before{
 .codex span.owned{border-color:rgba(179,157,255,.55);color:var(--txt);background:rgba(179,157,255,.14)}
 
 /* ---------- 底部标签 ---------- */
-#tabs{display:grid;grid-template-columns:repeat(5,1fr);background:rgba(8,12,26,.92);backdrop-filter:blur(14px);
+#tabs{display:grid;grid-template-columns:repeat(6,1fr);background:rgba(8,12,26,.92);backdrop-filter:blur(14px);
   border-top:1px solid var(--line);padding:5px 5px calc(5px + var(--safe-b))}
 #tabs button{background:none;border:none;font-family:inherit;color:var(--dim);cursor:pointer;
   display:flex;flex-direction:column;align-items:center;gap:2px;padding:5px 0;font-size:10px;font-weight:700}
@@ -317,6 +317,40 @@ button.draft-card{width:100%;font-family:inherit;color:var(--txt);text-align:lef
 .draft-card .dd{font-size:11px;color:var(--dim);line-height:1.45}
 .draft-card .pick-hint{position:absolute;right:10px;top:50%;transform:translateY(-50%);
   font-size:10px;font-weight:900;color:var(--rc);opacity:.85}
+
+/* ---------- 引力阵 ---------- */
+#tabs button{font-size:9.5px}
+#tabs button i{font-size:16px}
+.lattice-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin-bottom:11px;
+  background:var(--glass);border:1px solid var(--line);border-radius:16px;padding:8px;
+  backdrop-filter:blur(10px);touch-action:manipulation}
+.lattice-grid.locked{opacity:.45;filter:grayscale(.7)}
+.lat-cell{position:relative;aspect-ratio:1/1;min-height:0;border-radius:11px;border:1px solid var(--line);
+  background:rgba(255,255,255,.04);display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:1px;font-family:inherit;color:var(--txt);cursor:pointer;padding:2px;overflow:hidden;
+  transition:transform .1s,border-color .2s,background .2s}
+.lat-cell:active{transform:scale(.94)}
+.lat-cell .le{font-size:15px;line-height:1}
+.lat-cell .lm{font-size:8px;color:var(--dim);font-variant-numeric:tabular-nums;line-height:1}
+.lat-cell.core{background:radial-gradient(circle at 40% 35%,#1a2340,#070a16);
+  border-color:rgba(120,200,255,.45);cursor:default}
+.lat-cell.core .le{font-size:17px}
+.lat-cell.core .lm{color:var(--cyan)}
+.lat-cell.has{border-color:var(--ec,#6ee7ff);background:rgba(255,255,255,.08);
+  box-shadow:inset 0 0 14px rgba(255,255,255,.06)}
+.lat-cell.has .lm{color:var(--ec,#6ee7ff);font-weight:800}
+.lat-cell.off{border-style:dashed;opacity:.5}
+.lat-cell.tide{animation:latTide 1.05s ease-in-out infinite}
+@keyframes latTide{50%{transform:scale(1.07);box-shadow:0 0 14px var(--ec)}}
+.lat-picks{display:flex;flex-direction:column;gap:7px}
+.lat-pick{display:grid;grid-template-columns:34px 1fr auto;gap:9px;align-items:center;width:100%;
+  background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:12px;padding:9px 11px;
+  font-family:inherit;color:var(--txt);cursor:pointer;text-align:left;position:relative;overflow:hidden}
+.lat-pick::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--ec,#6ee7ff)}
+.lat-pick:active{transform:scale(.98)}
+.lat-pick .lp-i{font-size:20px;text-align:center}
+.lat-pick .lp-n{font-size:13px;font-weight:800}
+.lat-pick .lp-e{font-size:10.5px;color:var(--dim);white-space:nowrap}
 
 @media(min-width:640px){
   #topbar,#stage,#actionbar,#views{max-width:660px;margin-left:auto;margin-right:auto;width:100%}

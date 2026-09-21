@@ -3,6 +3,7 @@ import {
   GENERATORS, STAR_UPGRADES, PERKS, ACHIEVEMENTS, MORPHS,
   RARE_COLOR, RARE_LABEL, COMBO_MAX, COMBO_WINDOW, CHARGE_MAX, RESO_MAX,
   BOOST_MULT, COLLAPSE_REQUIRE, SINGULARITY_REQUIRE, ECHO_RATE,
+  LATTICE_CENTER, LATTICE_UNLOCK,
 } from './data.js';
 import * as core from './core.js';
 import { format, formatTime } from './util.js';
@@ -28,6 +29,8 @@ let draftQueued = false;
 let draftBound = false;
 let draftDismissed = false;
 let modalOnClose = null;
+let latBound = false;
+let latTarget = -1;
 let lastList = 0;
 let lastAch = 0;
 let lastAutoBuy = 0;
@@ -103,6 +106,8 @@ function wire() {
   $('recordBtn').addEventListener('click', onRecord);
   $('clearEchoBtn').addEventListener('click', onClearEcho);
   $('morphList').addEventListener('click', onMorphClick);
+  $('latticeGrid').addEventListener('click', onLatticeClick);
+  $('clearLatticeBtn').addEventListener('click', onClearLattice);
 
   // 弹窗关闭：右上角 ✕ / 点背景 / Esc（只对允许关闭的弹窗生效）
   const mc = $('modalClose');
@@ -679,7 +684,7 @@ export function hud(now) {
     if (now >= s.recordStart + s.recordLen * 1000) finishRecord();
   }
 
-  if (now - lastList > 240) { lastList = now; updateLists(now, false); }
+  if (now - lastList > 240) { lastList = now; updateLists(now, false); renderLattice(); }
 }
 
 function buildAchFlags() {
@@ -696,6 +701,7 @@ export function renderAll() {
   renderMorphPanel();
   renderPerkPanel();
   renderEchoPanel();
+  renderLattice();
   renderStats();
   syncToggles();
 }
@@ -910,6 +916,149 @@ function onClearEcho() {
   core.clearEcho(core.state);
   toast('残响已清除');
   renderEchoPanel();
+}
+
+/* ---------------- 引力阵 ---------------- */
+function renderLattice() {
+  const grid = $('latticeGrid');
+  if (!grid) return;
+  const s = core.state;
+  const N = 25;
+  if (grid.childElementCount !== N) {
+    grid.innerHTML = '';
+    for (let i = 0; i < N; i++) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'lat-cell';
+      b.setAttribute('data-idx', String(i));
+      b.innerHTML = '<span class="le"></span><span class="lm"></span>';
+      grid.appendChild(b);
+    }
+  }
+  const unlocked = core.latticeUnlocked(s);
+  grid.classList.toggle('locked', !unlocked);
+
+  const tide = core.tideElement(s);
+  const ti = $('tideInfo');
+  ti.textContent = tide.icon + ' ' + tide.name;
+  ti.style.color = tide.color;
+  $('tideHint').innerHTML = unlocked
+    ? '潮汐期间对应系的发射器产量 <b>×3</b>，每 40 秒轮换一次。'
+    : '累计 <b>' + format(LATTICE_UNLOCK) + '</b> 能量后解锁引力阵。';
+  $('latticeOut').textContent = format(core.latticeProd(s)) + '/s';
+  $('emitterInfo').textContent = core.placedCount(s) + '/' + core.latticeSlots(s);
+
+  for (let i = 0; i < N; i++) {
+    const b = grid.children[i];
+    const le = b.firstChild;
+    const lm = b.lastChild;
+    if (i === LATTICE_CENTER) {
+      b.className = 'lat-cell core';
+      le.textContent = '🕳️';
+      lm.textContent = '核心';
+      continue;
+    }
+    const cell = s.lattice[i];
+    if (!cell) {
+      b.className = 'lat-cell';
+      b.style.removeProperty('--ec');
+      le.textContent = '';
+      lm.textContent = core.nodeTierMult(i).toFixed(2);
+      continue;
+    }
+    const el = core.elementById(core.genElement(cell.t));
+    const online = core.latticeOnline(s, i);
+    b.className = 'lat-cell has' + (online ? '' : ' off') + (el.id === tide.id ? ' tide' : '');
+    b.style.setProperty('--ec', el.color);
+    le.textContent = GENERATORS[cell.t].icon;
+    lm.textContent = core.latticeNodeMult(s, i).toFixed(2) + '×';
+  }
+}
+
+function onLatticeClick(ev) {
+  const cellEl = ev.target && ev.target.closest ? ev.target.closest('.lat-cell') : null;
+  if (!cellEl) return;
+  const idx = parseInt(cellEl.getAttribute('data-idx'), 10);
+  if (!Number.isFinite(idx) || idx === LATTICE_CENTER) return;
+  const s = core.state;
+  if (!core.latticeUnlocked(s)) {
+    toast('累计 ' + format(LATTICE_UNLOCK) + ' 能量后解锁引力阵');
+    audio.sfxError();
+    return;
+  }
+
+  const cur = s.lattice[idx];
+  if (cur) {
+    const g = GENERATORS[cur.t];
+    const el = core.elementById(core.genElement(cur.t));
+    const online = core.latticeOnline(s, idx);
+    showModal('发射器 · ' + g.icon + ' ' + g.name,
+      '系别 <b>' + el.icon + ' ' + el.name + '</b><br>' +
+      '档位 <b>×' + core.nodeTierMult(idx).toFixed(2) + '</b><br>' +
+      '当前总倍率 <b>×' + core.latticeNodeMult(s, idx).toFixed(2) + '</b><br>' +
+      (online ? '状态 已连通核心' : '<b>状态 断连（只剩 20%）</b>'),
+      [
+        { label: '取消' },
+        { label: '移除', pri: true, onClick: () => {
+          core.removeEmitter(s, idx);
+          audio.sfxBuy();
+          renderLattice();
+          updateLists(Date.now(), true);
+        } },
+      ], true);
+    return;
+  }
+
+  const placed = core.placedTypes(s);
+  if (core.placedCount(s) >= core.latticeSlots(s)) {
+    toast('发射器已用完 · 可在星尘商店升级「引力发射器」');
+    audio.sfxError();
+    return;
+  }
+  const avail = [];
+  for (let t = 0; t < GENERATORS.length; t++) {
+    if (s.gens[t] > 0 && placed.indexOf(t) < 0) avail.push(t);
+  }
+  if (!avail.length) { toast('没有可放置的发射器'); audio.sfxError(); return; }
+
+  latTarget = idx;
+  const list = avail.map(t => {
+    const el = core.elementById(core.genElement(t));
+    return '<button type="button" class="lat-pick" data-t="' + t + '" style="--ec:' + el.color + '">' +
+      '<span class="lp-i">' + GENERATORS[t].icon + '</span>' +
+      '<span class="lp-n">' + GENERATORS[t].name + '</span>' +
+      '<span class="lp-e">' + el.icon + ' ' + el.name + '系</span>' +
+      '</button>';
+  }).join('');
+  showModal('选择发射器 · 档位 ' + core.nodeTierMult(idx).toFixed(2) + '×',
+    '<div class="lat-picks">' + list + '</div>', [{ label: '取消' }], true);
+  const box = $('modalBody');
+  if (!latBound) { latBound = true; box.addEventListener('click', onLatPickClick); }
+}
+
+function onLatPickClick(ev) {
+  const b = ev.target && ev.target.closest ? ev.target.closest('.lat-pick') : null;
+  if (!b) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  const t = parseInt(b.getAttribute('data-t'), 10);
+  const r = core.placeEmitter(core.state, latTarget, t);
+  if (!r) { audio.sfxError(); return; }
+  audio.sfxUpgrade();
+  vibrate(10);
+  hideModal();
+  latTarget = -1;
+  renderLattice();
+  updateLists(Date.now(), true);
+  const el = core.elementById(core.genElement(t));
+  toast('已放置 ' + GENERATORS[t].name + '（' + el.name + '系）', 'violet');
+}
+
+function onClearLattice() {
+  core.clearLattice(core.state);
+  audio.sfxError();
+  toast('引力阵已清空');
+  renderLattice();
 }
 
 function renderStats() {

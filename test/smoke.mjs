@@ -1,7 +1,7 @@
 // 核心逻辑冒烟测试：node test/smoke.mjs
 import assert from 'node:assert/strict';
 import * as core from '../js/core.js';
-import { GENERATORS, STAR_UPGRADES, PERKS, ACHIEVEMENTS, MORPHS, COLLAPSE_REQUIRE, SINGULARITY_REQUIRE, PERFECT_MULT, RESO_MAX } from '../js/data.js';
+import { GENERATORS, STAR_UPGRADES, PERKS, ACHIEVEMENTS, MORPHS, ELEMENTS, COLLAPSE_REQUIRE, SINGULARITY_REQUIRE, PERFECT_MULT, RESO_MAX } from '../js/data.js';
 import { format, parseNum } from '../js/util.js';
 
 let pass = 0;
@@ -339,7 +339,7 @@ ok('成就解锁不重复', () => {
 });
 ok('配置表规模正确', () => {
   assert.equal(GENERATORS.length, 10);
-  assert.equal(STAR_UPGRADES.length, 11);
+  assert.equal(STAR_UPGRADES.length, 12);
   assert.equal(PERKS.length, 15);
   assert.ok(ACHIEVEMENTS.length >= 30);
 });
@@ -466,6 +466,145 @@ ok('存档清洗非法形态与残响', () => {
 ok('形态表完整', () => {
   assert.equal(MORPHS.length, 4);
   assert.equal(new Set(MORPHS.map(m => m.id)).size, 4);
+});
+
+console.log('\n[11] 引力阵（空间优化解谜）');
+ok('未解锁时不能放置', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  s.totalAll = 1e7;
+  s.gens[0] = 10;
+  assert.equal(core.latticeUnlocked(s), false);
+  assert.equal(core.placeEmitter(s, 7, 0), null);
+  s.totalAll = 1e8;
+  assert.equal(core.latticeUnlocked(s), true);
+  assert.ok(core.placeEmitter(s, 7, 0));
+});
+ok('同一台机器只能放一个发射器', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  s.totalAll = 1e8;
+  s.gens[0] = 10;
+  s.gens[1] = 10;
+  assert.ok(core.placeEmitter(s, 7, 0));
+  assert.equal(core.placeEmitter(s, 8, 0), null, '重复类型应失败');
+  assert.ok(core.placeEmitter(s, 8, 1));
+  assert.equal(core.placedCount(s), 2);
+});
+ok('发射器数量受上限约束，升级后增加', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  s.totalAll = 1e8;
+  for (let i = 0; i < 10; i++) s.gens[i] = 1;
+  s.tideIdx = 3;
+  assert.equal(core.latticeSlots(s), 3);
+  const nodes = [7, 6, 8, 11, 13, 17];
+  for (let k = 0; k < 3; k++) assert.ok(core.placeEmitter(s, nodes[k], k), '第 ' + k + ' 个应成功');
+  assert.equal(core.placeEmitter(s, nodes[3], 3), null, '超上限应失败');
+  s.starUp.emitters = 2;
+  assert.equal(core.latticeSlots(s), 5);
+  assert.ok(core.placeEmitter(s, nodes[3], 3), '升级后可继续放置');
+});
+ok('离核心越近档位越高', () => {
+  assert.ok(core.nodeTierMult(7) > core.nodeTierMult(6));
+  assert.ok(core.nodeTierMult(6) > core.nodeTierMult(1));
+  assert.ok(core.nodeTierMult(1) > core.nodeTierMult(0));
+});
+ok('相邻同系 +25%，克制 -15%', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  s.totalAll = 1e8;
+  for (let i = 0; i < 10; i++) s.gens[i] = 1;
+  s.tideIdx = 3;
+  s.lattice[7] = { t: 0 };
+  assert.ok(Math.abs(core.latticeNodeMult(s, 7) - 1) < 1e-9);
+  s.lattice[6] = { t: 2 };
+  assert.ok(Math.abs(core.latticeNodeMult(s, 7) - 1.25) < 1e-9, '同系应为 1.25');
+  s.lattice[6] = { t: 1 };
+  assert.ok(Math.abs(core.latticeNodeMult(s, 7) - 0.85) < 1e-9, '克制应为 0.85');
+  s.lattice[6] = null;
+});
+ok('潮汐期间对应系 ×3', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  s.totalAll = 1e8;
+  s.gens[0] = 1;
+  s.lattice[7] = { t: 0 };
+  s.tideIdx = 3;
+  const off = core.latticeNodeMult(s, 7);
+  s.tideIdx = 0;
+  const on = core.latticeNodeMult(s, 7);
+  assert.ok(Math.abs(on / off - 3) < 1e-9);
+  s.tideIdx = 3;
+});
+ok('断连的发射器只剩 20%', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  s.totalAll = 1e8;
+  for (let i = 0; i < 10; i++) s.gens[i] = 1;
+  s.tideIdx = 3;
+  s.lattice[0] = { t: 5 };
+  assert.equal(core.latticeOnline(s, 0), false);
+  const offline = core.latticeNodeMult(s, 0);
+  assert.ok(Math.abs(offline - 0.55 * 0.2) < 1e-9, '断连 = 档位 × 0.2');
+  s.lattice[5] = { t: 5 };
+  s.lattice[10] = { t: 6 };
+  s.lattice[11] = { t: 7 };
+  assert.equal(core.latticeOnline(s, 0), true, '经 5→10→11 应连回核心');
+  assert.ok(core.latticeNodeMult(s, 0) > offline * 4);
+});
+ok('移除与清空', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  s.totalAll = 1e8;
+  s.gens[0] = 1;
+  core.placeEmitter(s, 7, 0);
+  assert.equal(core.placedCount(s), 1);
+  assert.ok(core.removeEmitter(s, 7));
+  assert.equal(core.placedCount(s), 0);
+  core.placeEmitter(s, 7, 0);
+  core.clearLattice(s);
+  assert.equal(core.placedCount(s), 0);
+});
+ok('引力阵产出计入总产量', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  s.totalAll = 1e8;
+  s.tideIdx = 3;
+  s.gens[0] = 100;
+  const before = core.rawProd(s);
+  assert.ok(core.placeEmitter(s, 7, 0));
+  const after = core.rawProd(s);
+  assert.ok(after > before);
+  assert.ok(Math.abs(core.latticeProd(s) - (after - before)) < 1e-9);
+  assert.ok(Math.abs(core.latticeProd(s) - 100 * 0.1 * 0.7) < 1e-9);
+});
+ok('坍缩后布局保留（重建机器即恢复）', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  s.totalAll = 1e8;
+  s.gens[0] = 1;
+  core.placeEmitter(s, 7, 0);
+  s.totalRun = COLLAPSE_REQUIRE;
+  core.doCollapse(Date.now(), s);
+  assert.equal(core.placedCount(s), 1);
+});
+ok('存档清洗非法引力阵', () => {
+  const bad = core.normalize({ lattice: [{ t: 0 }, { t: 999 }, null], tideIdx: 99, tideStart: -5 });
+  assert.equal(bad.lattice.length, 25);
+  assert.equal(bad.lattice[0].t, 0);
+  assert.equal(bad.lattice[1], null);
+  assert.equal(bad.lattice[12], null);
+  assert.equal(bad.tideIdx, 0);
+  assert.equal(bad.tideStart, 0);
+});
+ok('存档中同一机器不会重复放置', () => {
+  const lat = new Array(25).fill(null);
+  lat[7] = { t: 0 };
+  lat[8] = { t: 0 };
+  lat[9] = { t: 1 };
+  const s = core.normalize({ lattice: lat });
+  assert.equal(core.placedCount(s), 2);
 });
 
 console.log('\n通过 ' + pass + ' 项检查' + (process.exitCode ? '（存在失败）' : '，全部正常') + '\n');

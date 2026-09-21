@@ -27,6 +27,7 @@ export const STAR_UPGRADES = [
   { id: 'autoClick', name: '自动点击器', icon: '🤖', base: 50, growth: 3.0, max: 10, desc: '每秒自动点击 1 次 / 级' },
   { id: 'autoBuy',   name: '智能采购', icon: '🛒', base: 500, growth: 1.0,  max: 1,  desc: '自动购买最便宜的机器' },
   { id: 'headstart', name: '奇点火种', icon: '🔥', base: 30,  growth: 2.4,  max: 8,  desc: '坍缩后起始能量 10^(3×级)' },
+  { id: 'emitters',  name: '引力发射器', icon: '📡', base: 18, growth: 2.6,  max: 5,  desc: '引力阵可多放 1 个发射器' },
 ];
 
 // 奇点词条：每次坍缩后 3 选 1，本轮生效，形成不同 build
@@ -157,3 +158,32 @@ export const RECORD_LEN  = 4;              // 残响录制时长（秒）
 export const ECHO_RATE   = 0.6;            // 残响收益系数
 export const ECHO_UNLOCK_COLLAPSES = 2;    // 坍缩 2 次后解锁残响录制
 export const ECHO_MAX_TAPS = 120;          // 单次录制最多记录点击数
+
+// ============ 引力阵：空间优化解谜 ============
+export const ELEMENTS = [
+  { id: 'grav',    name: '引力', icon: '🌀', color: '#6ee7ff' },
+  { id: 'entropy', name: '熵',   icon: '🕳️', color: '#ff6ad5' },
+  { id: 'chrono',  name: '时序', icon: '⏳', color: '#ffcc4d' },
+  { id: 'void',    name: '虚空', icon: '🌑', color: '#b39dff' },
+];
+
+// 系反应矩阵：同系共鸣 +25%，克制 -15%，其余 +5% ~ +10%
+export const REACTION = {
+  grav:    { grav: 0.25, entropy: -0.15, chrono: 0.05, void: 0.10 },
+  entropy: { grav: -0.15, entropy: 0.25, chrono: 0.10, void: 0.05 },
+  chrono:  { grav: 0.05, entropy: 0.10, chrono: 0.25, void: -0.15 },
+  void:    { grav: 0.10, entropy: 0.05, chrono: -0.15, void: 0.25 },
+};
+
+// 每种发电机属于哪个系（10 台机器 → 4 系）
+export const GEN_ELEMENT = ['grav', 'entropy', 'grav', 'entropy', 'void', 'chrono', 'chrono', 'void', 'chrono', 'entropy'];
+
+export const LATTICE_SIZE   = 5;        // 5×5 网格
+export const LATTICE_CENTER = 12;       // 正中间是核心，不可放置
+export const LATTICE_SCALE  = 0.7;      // 引力阵产出系数
+export const LATTICE_UNLOCK = 1e8;      // 累计能量解锁
+export const TIER_MULT      = [0, 1.00, 0.85, 0.70, 0.55]; // 按到核心的曼哈顿距离
+export const OFFLINE_NODE_MULT = 0.2;   // 未连通的发射器只剩 20%
+export const EMITTER_BASE   = 3;        // 初始发射器数量
+export const TIDE_PERIOD    = 40;       // 引力潮汐轮换周期（秒）
+export const TIDE_MULT      = 3;        // 潮汐期间对应系 ×3

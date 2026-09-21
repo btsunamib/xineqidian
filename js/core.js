@@ -7,6 +7,8 @@ import {
   CLICK_SHARE, BOOST_MULT, DEVOUR_BASE,
   COLLAPSE_REQUIRE, SINGULARITY_REQUIRE, OFFLINE_CAP, OFFLINE_BASE, ACH_BONUS, REROLL_COST,
   MORPH_UNLOCK_COLLAPSES, RECORD_LEN, ECHO_RATE, ECHO_UNLOCK_COLLAPSES, ECHO_MAX_TAPS,
+  ELEMENTS, REACTION, GEN_ELEMENT, LATTICE_SIZE, LATTICE_CENTER, LATTICE_SCALE,
+  LATTICE_UNLOCK, TIER_MULT, OFFLINE_NODE_MULT, EMITTER_BASE, TIDE_PERIOD, TIDE_MULT,
 } from './data.js';
 
 export const SAVE_KEY = 'xineqidian_save_v2';
@@ -39,6 +41,7 @@ export function newState() {
     morph: null, morphAt: 0,
     echo: null, echoAcc: 0, echoIdx: 0, echoHits: 0,
     recording: false, recordStart: 0, recordBuf: [], recordLen: RECORD_LEN,
+    lattice: emptyLattice(), tideIdx: 0, tideStart: 0,
     chainUntil: 0,
     pulseStart: 0,
     boostUntil: 0, boostMult: BOOST_MULT,
@@ -172,10 +175,161 @@ export function burstDuration(s = state) {
 export function boostDuration(s = state) { return 30 + 3 * starLevel('orb', s); }
 export function burstMult(s = state) { return BURST_MULT * perkAgg(s).burstMult * morphAgg(s).burstMult; }
 
-export function rawProd(s = state) {
+/* ---------------- 引力阵（空间优化解谜） ---------------- */
+export function emptyLattice() {
+  const n = LATTICE_SIZE * LATTICE_SIZE;
+  const arr = new Array(n);
+  for (let i = 0; i < n; i++) arr[i] = null;
+  return arr;
+}
+
+export function latticeUnlocked(s = state) { return s.totalAll >= LATTICE_UNLOCK; }
+export function genElement(typeIdx) { return GEN_ELEMENT[typeIdx] || 'grav'; }
+export function elementById(id) {
+  for (let i = 0; i < ELEMENTS.length; i++) if (ELEMENTS[i].id === id) return ELEMENTS[i];
+  return ELEMENTS[0];
+}
+
+function nodeRowCol(idx) {
+  return [Math.floor(idx / LATTICE_SIZE), idx % LATTICE_SIZE];
+}
+
+export function nodeDistance(idx) {
+  const rc = nodeRowCol(idx);
+  return Math.abs(rc[0] - 2) + Math.abs(rc[1] - 2);
+}
+
+export function nodeTierMult(idx) {
+  const d = Math.min(4, Math.max(1, nodeDistance(idx)));
+  return TIER_MULT[d] || 0.55;
+}
+
+export function orthNeighbors(idx) {
+  const rc = nodeRowCol(idx);
+  const r = rc[0];
+  const c = rc[1];
+  const out = [];
+  if (r > 0) out.push(idx - LATTICE_SIZE);
+  if (r < LATTICE_SIZE - 1) out.push(idx + LATTICE_SIZE);
+  if (c > 0) out.push(idx - 1);
+  if (c < LATTICE_SIZE - 1) out.push(idx + 1);
+  return out;
+}
+
+export function latticeSlots(s = state) {
+  return Math.min(10, EMITTER_BASE + starLevel('emitters', s) + Math.floor(s.collapses / 3));
+}
+
+export function placedCount(s = state) {
+  let n = 0;
+  const L = s.lattice || [];
+  for (let i = 0; i < L.length; i++) if (L[i]) n++;
+  return n;
+}
+
+export function placedTypes(s = state) {
+  const out = [];
+  const L = s.lattice || [];
+  for (let i = 0; i < L.length; i++) if (L[i]) out.push(L[i].t);
+  return out;
+}
+
+// 是否通过已放置节点连回核心（曼哈顿距离 1 的格子算直连）
+export function latticeOnline(s, idx) {
+  const seen = {};
+  const stack = [idx];
+  let guard = 0;
+  while (stack.length && guard++ < 64) {
+    const cur = stack.pop();
+    if (seen[cur]) continue;
+    seen[cur] = 1;
+    if (nodeDistance(cur) === 1) return true;
+    const nb = orthNeighbors(cur);
+    for (let i = 0; i < nb.length; i++) {
+      const n = nb[i];
+      if (s.lattice[n] && !seen[n]) stack.push(n);
+    }
+  }
+  return false;
+}
+
+// 单格最终倍率 = 距离档位 × (1 + 相邻系反应) × 潮汐 × 连通
+export function latticeNodeMult(s, idx) {
+  const cell = (s.lattice || [])[idx];
+  if (!cell) return 0;
+  const el = genElement(cell.t);
+  let bonus = 0;
+  const nb = orthNeighbors(idx);
+  for (let i = 0; i < nb.length; i++) {
+    const c2 = s.lattice[nb[i]];
+    if (!c2) continue;
+    const row = REACTION[el] || {};
+    const r = row[genElement(c2.t)];
+    if (typeof r === 'number') bonus += r;
+  }
+  let m = nodeTierMult(idx) * Math.max(0.35, 1 + bonus);
+  if (el === (ELEMENTS[s.tideIdx] || ELEMENTS[0]).id) m *= TIDE_MULT;
+  if (!latticeOnline(s, idx)) m *= OFFLINE_NODE_MULT;
+  return m;
+}
+
+export function latticeProd(s = state) {
+  const L = s.lattice;
+  if (!L) return 0;
+  let sum = 0;
+  for (let i = 0; i < L.length; i++) {
+    const cell = L[i];
+    if (!cell) continue;
+    const g = GENERATORS[cell.t];
+    if (!g) continue;
+    sum += s.gens[cell.t] * g.prod * latticeNodeMult(s, i);
+  }
+  return sum * LATTICE_SCALE;
+}
+
+export function tideElement(s = state) { return ELEMENTS[s.tideIdx] || ELEMENTS[0]; }
+
+export function placeEmitter(s, idx, typeIdx) {
+  if (!latticeUnlocked(s)) return null;
+  if (idx === LATTICE_CENTER) return null;
+  if (idx < 0 || idx >= LATTICE_SIZE * LATTICE_SIZE) return null;
+  if (s.lattice[idx]) return null;
+  if (placedCount(s) >= latticeSlots(s)) return null;
+  if (placedTypes(s).indexOf(typeIdx) >= 0) return null;
+  if (!(s.gens[typeIdx] > 0)) return null;
+  s.lattice[idx] = { t: typeIdx };
+  return { idx, t: typeIdx };
+}
+
+export function removeEmitter(s, idx) {
+  if (!s.lattice[idx]) return null;
+  const t = s.lattice[idx].t;
+  s.lattice[idx] = null;
+  return { idx, t };
+}
+
+export function clearLattice(s = state) {
+  s.lattice = emptyLattice();
+  return true;
+}
+
+export function moveEmitter(s, from, to) {
+  if (!s.lattice[from] || s.lattice[to] || to === LATTICE_CENTER) return null;
+  if (to < 0 || to >= LATTICE_SIZE * LATTICE_SIZE) return null;
+  const t = s.lattice[from].t;
+  s.lattice[from] = null;
+  s.lattice[to] = { t };
+  return { from, to, t };
+}
+
+export function baseProd(s = state) {
   let sum = 0;
   for (let i = 0; i < GENERATORS.length; i++) sum += s.gens[i] * GENERATORS[i].prod;
   return sum;
+}
+
+export function rawProd(s = state) {
+  return baseProd(s) + latticeProd(s);
 }
 
 export function globalMult(now = Date.now(), s = state, opts) {
@@ -594,6 +748,11 @@ export function tick(dt, now = Date.now(), s = state) {
     s.resoDecayAcc = 0;
   }
 
+  // 引力潮汐轮换
+  if (!s.tideStart) s.tideStart = now;
+  const tideNext = Math.floor(Math.max(0, now - s.tideStart) / (TIDE_PERIOD * 1000)) % ELEMENTS.length;
+  if (tideNext !== s.tideIdx) s.tideIdx = tideNext;
+
   if (s.combo > 0 && now - s.comboAt > COMBO_WINDOW * 1000) s.combo = 0;
 
   return gain;
@@ -642,6 +801,23 @@ export function normalize(data) {
   if (typeof s.perkPicksLeft !== 'number' || !Number.isFinite(s.perkPicksLeft) || s.perkPicksLeft < 0) s.perkPicksLeft = 0;
 
   if (s.morph && !MORPH_BY_ID[s.morph]) s.morph = null;
+
+  // 引力阵：只保留合法且不重复的放置
+  const rawLat = Array.isArray(s.lattice) ? s.lattice : [];
+  const seenType = {};
+  s.lattice = emptyLattice();
+  for (let i = 0; i < s.lattice.length; i++) {
+    if (i === LATTICE_CENTER) continue;
+    const c = rawLat[i];
+    if (!c || typeof c !== 'object') continue;
+    const t = Math.floor(c.t);
+    if (!Number.isFinite(t) || t < 0 || t >= GENERATORS.length) continue;
+    if (seenType[t]) continue;
+    seenType[t] = 1;
+    s.lattice[i] = { t };
+  }
+  if (typeof s.tideIdx !== 'number' || !Number.isFinite(s.tideIdx) || s.tideIdx < 0 || s.tideIdx >= ELEMENTS.length) s.tideIdx = 0;
+  if (typeof s.tideStart !== 'number' || !Number.isFinite(s.tideStart) || s.tideStart < 0) s.tideStart = 0;
 
   if (s.echo && typeof s.echo === 'object' && Array.isArray(s.echo.taps)) {
     s.echo.taps = s.echo.taps

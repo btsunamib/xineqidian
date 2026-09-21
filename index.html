@@ -70,6 +70,25 @@
       <div id="genList" class="list"></div>
     </section>
 
+    <section class="view" id="view-lattice">
+      <div class="panel">
+        <div class="row"><span>引力潮汐</span><b id="tideInfo">🌀 引力</b></div>
+        <div class="hint" id="tideHint">潮汐期间对应系的发射器产量 ×3，每 40 秒轮换一次。</div>
+        <div class="row sub"><span>引力阵产出</span><b id="latticeOut">0/s</b></div>
+        <div class="row sub"><span>发射器</span><b id="emitterInfo">0/3</b></div>
+      </div>
+      <div id="latticeGrid" class="lattice-grid"></div>
+      <div class="panel">
+        <div class="hint">
+          相邻<b>同系 +25%</b> · 克制 <b>-15%</b> · 其余 +5%~+10%<br>
+          离核心越近档位越高（1.00 / 0.85 / 0.70 / 0.55）<br>
+          必须通过已放置的格子<b>连回核心</b>，断连只剩 20%<br>
+          同一台机器只能放一个发射器
+        </div>
+        <button id="clearLatticeBtn" class="big-btn danger">清空引力阵</button>
+      </div>
+    </section>
+
     <section class="view" id="view-star">
       <div class="panel star-panel">
         <div class="row"><span>✦ 星尘</span><b id="starAmount">0</b></div>
@@ -142,8 +161,9 @@
 
   <nav id="tabs">
     <button data-view="gen" class="on"><i>⚛️</i><span>进化</span></button>
+    <button data-view="lattice"><i>🌀</i><span>引力</span></button>
     <button data-view="star"><i>✦</i><span>星尘</span></button>
-    <button data-view="perk"><i>🧬</i><span>词条</span></button>
+    <button data-view="perk"><i>🧬</i><span>构筑</span></button>
     <button data-view="ach"><i>🏆</i><span>成就</span></button>
     <button data-view="set"><i>⚙️</i><span>设置</span></button>
   </nav>

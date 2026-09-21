@@ -83,7 +83,7 @@ await ok('关键节点齐全', () => {
 });
 await ok('列表渲染完整', () => {
   assert.equal($('genList').querySelectorAll('.card').length, 10);
-  assert.equal($('starList').querySelectorAll('.card').length, 11);
+  assert.equal($('starList').querySelectorAll('.card').length, 12);
   assert.equal($('achList').querySelectorAll('.ach').length, 34);
   assert.ok($('perkCodex').querySelectorAll('span').length >= 15);
 });
@@ -327,6 +327,53 @@ await ok('强制确认型弹窗（坍缩）仍然没有 ✕', () => {
   assert.ok($('modalClose').classList.contains('hidden'), '确认弹窗不应出现 ✕');
   click($('modalActions').querySelector('button'));
   assert.ok($('modal').classList.contains('hidden'));
+});
+
+console.log('\n[DOM-9] 引力阵交互');
+core.state.perkPicksLeft = 0;
+core.state.perkChoices = [];
+ui.hideModal();
+
+await ok('引力阵渲染 25 格，中心是核心', () => {
+  core.state.totalAll = 1e8;
+  core.state.gens[0] = 5;
+  core.clearLattice(core.state);
+  ui.renderAll();
+  const cells = w.document.querySelectorAll('.lat-cell');
+  assert.equal(cells.length, 25);
+  assert.ok(cells[12].classList.contains('core'), '第 12 格应是核心');
+  assert.equal($('emitterInfo').textContent, '0/3');
+});
+await ok('点空格弹出选择器，选中后放置成功', async () => {
+  click(w.document.querySelectorAll('.lat-cell')[7]);
+  assert.ok(!$('modal').classList.contains('hidden'), '应弹出选择器');
+  const picks = w.document.querySelectorAll('.lat-pick');
+  assert.ok(picks.length >= 1, '应有可放置的发射器');
+  click(picks[0]);
+  await sleep(80);
+  assert.equal(core.placedCount(core.state), 1);
+  assert.equal(w.document.querySelectorAll('.lat-cell.has').length, 1);
+});
+await ok('点已放置的格子可移除', () => {
+  click(w.document.querySelectorAll('.lat-cell')[7]);
+  assert.ok(!$('modal').classList.contains('hidden'));
+  const btns = $('modalActions').querySelectorAll('button');
+  assert.ok(btns.length >= 2);
+  click(btns[btns.length - 1]);
+  assert.equal(core.placedCount(core.state), 0);
+});
+await ok('清空按钮生效', () => {
+  core.state.totalAll = 1e8;
+  core.state.gens[0] = 5;
+  core.placeEmitter(core.state, 7, 0);
+  assert.equal(core.placedCount(core.state), 1);
+  click($('clearLatticeBtn'));
+  assert.equal(core.placedCount(core.state), 0);
+});
+await ok('引力标签页可切换', () => {
+  click(w.document.querySelector('#tabs button[data-view="lattice"]'));
+  assert.ok($('view-lattice').classList.contains('active'));
+  assert.ok($('tideInfo').textContent.length > 0);
 });
 
 console.log('\n通过 ' + pass + ' 项 DOM 检查' + (fail ? '（' + fail + ' 项失败）' : '，全部正常') + '\n');
