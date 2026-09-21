@@ -472,11 +472,11 @@ console.log('\n[11] 引力阵（空间优化解谜）');
 ok('未解锁时不能放置', () => {
   const s = core.state;
   Object.assign(s, core.newState());
-  s.totalAll = 1e7;
+  s.totalAll = 1e3;
   s.gens[0] = 10;
   assert.equal(core.latticeUnlocked(s), false);
   assert.equal(core.placeEmitter(s, 7, 0), null);
-  s.totalAll = 1e8;
+  s.totalAll = 1e5;
   assert.equal(core.latticeUnlocked(s), true);
   assert.ok(core.placeEmitter(s, 7, 0));
 });
@@ -605,6 +605,138 @@ ok('存档中同一机器不会重复放置', () => {
   lat[9] = { t: 1 };
   const s = core.normalize({ lattice: lat });
   assert.equal(core.placedCount(s), 2);
+});
+
+console.log('\n[12] 开局种子');
+ok('默认未选种子，效果中性', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  assert.equal(core.seedChosen(s), false);
+  const a = core.seedAgg(s);
+  assert.equal(a.clickMult, 1);
+  assert.equal(a.costMult, 1);
+});
+ok('选定后不可更改', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  assert.ok(core.chooseSeed('ember', s));
+  assert.equal(s.seed, 'ember');
+  assert.equal(core.chooseSeed('forge', s), null);
+  assert.equal(s.seed, 'ember');
+});
+ok('炽核：点击力 ×4，价格 +25%', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  s.gens[0] = 5;
+  const c0 = core.clickPower(1, s);
+  const g0 = core.genCost(0, 1, s);
+  core.chooseSeed('ember', s);
+  assert.ok(Math.abs(core.clickPower(1, s) / c0 - 4) < 1e-9);
+  assert.ok(Math.abs(core.genCost(0, 1, s) / g0 - 1.25) < 1e-9);
+});
+ok('工核：起始能量 + 价格 -15% + 前期产量 ×3', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  core.chooseSeed('forge', s);
+  assert.equal(s.energy, 2000);
+  assert.ok(Math.abs(core.genCost(0, 1, s) / GENERATORS[0].base - 0.85) < 1e-9);
+  s.gens[0] = 10;
+  const early = core.eps(1, s);
+  s.totalAll = 1e10;
+  const late = core.eps(1, s);
+  assert.ok(Math.abs(early / late - 3) < 1e-9, '累计 1e9 前应 ×3');
+});
+ok('奇核：开局解锁引力阵 + 多 2 发射器 + 吞噬 ×3', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  assert.equal(core.latticeUnlocked(s), false);
+  const slots0 = core.latticeSlots(s);
+  core.chooseSeed('lattice', s);
+  assert.equal(core.latticeUnlocked(s), true);
+  assert.equal(core.latticeSlots(s), slots0 + 2);
+  s.gens[0] = 100;
+  const boosted = core.devourGain(1, s);
+  s.seed = null;
+  const plain = core.devourGain(1, s);
+  assert.ok(Math.abs(boosted / plain - 3) < 1e-9);
+  s.seed = 'lattice';
+});
+ok('存档清洗非法种子', () => {
+  const bad = core.normalize({ seed: 'nope' });
+  assert.equal(bad.seed, null);
+});
+
+console.log('\n[13] 前期委托');
+ok('完成后只发一次奖励', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  assert.equal(core.objectiveCount(s), 0);
+  s.perfects = 10;
+  const got = core.checkObjectives(s);
+  assert.ok(got.some(o => o.id === 'tap10'));
+  assert.equal(core.checkObjectives(s).length, 0);
+  assert.equal(core.objectiveCount(s), 1);
+});
+ok('tap10 奖励：爆发充能 +60', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  s.charge = 0;
+  s.perfects = 10;
+  core.checkObjectives(s);
+  assert.equal(s.charge, 60);
+});
+ok('buy3 奖励：星尘 +1 与词条次数 +1', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  s.gens[0] = 1; s.gens[1] = 1; s.gens[2] = 1;
+  const sd0 = s.stardust;
+  const pk0 = s.perkPicksLeft;
+  core.checkObjectives(s);
+  assert.equal(s.stardust, sd0 + 1);
+  assert.equal(s.perkPicksLeft, pk0 + 1);
+});
+ok('devour20 奖励：临时产量 ×2 并在 3 分钟后失效', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  s.devoured = 20;
+  core.checkObjectives(s);
+  assert.equal(core.tempMult(Date.now(), s), 2);
+  assert.equal(core.tempMult(Date.now() + 200000, s), 1);
+});
+ok('place2 奖励：发射器 +1', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  s.totalAll = 1e5;
+  s.gens[0] = 1;
+  s.gens[1] = 1;
+  const slots0 = core.latticeSlots(s);
+  s.lattice[7] = { t: 0 };
+  s.lattice[6] = { t: 1 };
+  core.checkObjectives(s);
+  assert.equal(core.latticeSlots(s), slots0 + 1);
+});
+ok('burst1 奖励：爆发时长 +3 秒', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  const d0 = core.burstDuration(s);
+  s.bursts = 1;
+  core.checkObjectives(s);
+  assert.ok(Math.abs(core.burstDuration(s) - (d0 + 3)) < 1e-9);
+});
+ok('collapse1 奖励：词条槽位 +1', () => {
+  const s = core.state;
+  Object.assign(s, core.newState());
+  const p0 = core.perkSlots(s);
+  s.collapses = 1;
+  core.checkObjectives(s);
+  assert.equal(core.perkSlots(s), p0 + 1);
+});
+ok('委托状态可存档并被清洗', () => {
+  const s = core.state;
+  const back = core.normalize(JSON.parse(core.serialize(s)));
+  assert.ok(back.objectives.collapse1 === 1, '上一个用例完成的 collapse1 应被保留');
+  const bad = core.normalize({ objectives: 'nope' });
+  assert.equal(typeof bad.objectives, 'object');
 });
 
 console.log('\n通过 ' + pass + ' 项检查' + (process.exitCode ? '（存在失败）' : '，全部正常') + '\n');

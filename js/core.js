@@ -7,8 +7,9 @@ import {
   CLICK_SHARE, BOOST_MULT, DEVOUR_BASE,
   COLLAPSE_REQUIRE, SINGULARITY_REQUIRE, OFFLINE_CAP, OFFLINE_BASE, ACH_BONUS, REROLL_COST,
   MORPH_UNLOCK_COLLAPSES, RECORD_LEN, ECHO_RATE, ECHO_UNLOCK_COLLAPSES, ECHO_MAX_TAPS,
-  ELEMENTS, REACTION, GEN_ELEMENT, LATTICE_SIZE, LATTICE_CENTER, LATTICE_SCALE,
+ELEMENTS, REACTION, GEN_ELEMENT, LATTICE_SIZE, LATTICE_CENTER, LATTICE_SCALE,
   LATTICE_UNLOCK, TIER_MULT, OFFLINE_NODE_MULT, EMITTER_BASE, TIDE_PERIOD, TIDE_MULT,
+  SEEDS, OBJECTIVES, EARLY_PROD_UNTIL,
 } from './data.js';
 
 export const SAVE_KEY = 'xineqidian_save_v2';
@@ -41,7 +42,9 @@ export function newState() {
     morph: null, morphAt: 0,
     echo: null, echoAcc: 0, echoIdx: 0, echoHits: 0,
     recording: false, recordStart: 0, recordBuf: [], recordLen: RECORD_LEN,
-    lattice: emptyLattice(), tideIdx: 0, tideStart: 0,
+lattice: emptyLattice(), tideIdx: 0, tideStart: 0,
+    seed: null, objectives: {},
+    tempMult: 1, tempUntil: 0, emitterExtra: 0, burstExtra: 0, perkSlotExtra: 0,
     chainUntil: 0,
     pulseStart: 0,
     boostUntil: 0, boostMult: BOOST_MULT,
@@ -123,6 +126,97 @@ export function chooseMorph(id, s = state) {
 export function echoUnlocked(s = state) { return s.collapses >= ECHO_UNLOCK_COLLAPSES; }
 export function hasEcho(s = state) { return !!(s.echo && s.echo.taps && s.echo.taps.length); }
 
+/* ---------------- 开局种子 ---------------- */
+export const SEED_BY_ID = {};
+for (const sd of SEEDS) SEED_BY_ID[sd.id] = sd;
+
+let _seedCache = null;
+let _seedKey = '\u0000';
+
+export function seedAgg(s = state) {
+  const key = s.seed || '';
+  if (key === _seedKey && _seedCache) return _seedCache;
+  const a = {
+    clickMult: 1, costMult: 1, devourMult: 1, earlyProd: 1,
+    perfectReso: 0, emitterBonus: 0, startEnergy: 0, latticeNow: 0,
+  };
+  const sd = key ? SEED_BY_ID[key] : null;
+  if (sd) {
+    for (const k in sd.effects) {
+      const v = sd.effects[k];
+      if (!(k in a)) continue;
+      if (k === 'clickMult' || k === 'costMult' || k === 'devourMult' || k === 'earlyProd') a[k] *= v;
+      else a[k] = v;
+    }
+  }
+  _seedCache = a;
+  _seedKey = key;
+  return a;
+}
+
+export function seedChosen(s = state) { return !!s.seed; }
+
+export function chooseSeed(id, s = state) {
+  if (s.seed) return null;
+  const sd = SEED_BY_ID[id];
+  if (!sd) return null;
+  s.seed = id;
+  const a = seedAgg(s);
+  if (a.startEnergy > 0) addEnergy(a.startEnergy, s);
+  s.pulseStart = Date.now();
+  return sd;
+}
+
+export function tempMult(now = Date.now(), s = state) {
+  return now < s.tempUntil ? s.tempMult : 1;
+}
+
+/* ---------------- 前期委托 ---------------- */
+const OBJECTIVE_CHECKS = {
+  tap10: s => s.perfects >= 10,
+  buy3: s => {
+    let n = 0;
+    for (let i = 0; i < s.gens.length; i++) if (s.gens[i] > 0) n++;
+    return n >= 3;
+  },
+  devour20: s => s.devoured >= 20,
+  place2: s => placedCount(s) >= 2,
+  burst1: s => s.bursts >= 1,
+  collapse1: s => s.collapses >= 1,
+};
+
+function applyObjectiveReward(id, s) {
+  switch (id) {
+    case 'tap10': addCharge(60, s); break;
+    case 'buy3': s.stardust += 1; s.perkPicksLeft += 1; s.perkChoices = []; break;
+    case 'devour20': s.tempMult = 2; s.tempUntil = Date.now() + 180000; break;
+    case 'place2': s.emitterExtra += 1; break;
+    case 'burst1': s.burstExtra += 3; break;
+    case 'collapse1': s.perkSlotExtra += 1; break;
+    default: break;
+  }
+}
+
+export function objectiveDone(id, s = state) { return !!s.objectives[id]; }
+export function objectiveCount(s = state) {
+  let n = 0;
+  for (const o of OBJECTIVES) if (s.objectives[o.id]) n++;
+  return n;
+}
+
+export function checkObjectives(s = state) {
+  const done = [];
+  for (const o of OBJECTIVES) {
+    if (s.objectives[o.id]) continue;
+    const fn = OBJECTIVE_CHECKS[o.id];
+    if (!fn || !fn(s)) continue;
+    s.objectives[o.id] = 1;
+    applyObjectiveReward(o.id, s);
+    done.push(o);
+  }
+  return done;
+}
+
 export function starLevel(id, s = state) { return s.starUp[id] || 0; }
 export function achCount(s = state) { return Object.keys(s.ach).length; }
 export function totalGens(s = state) {
@@ -170,7 +264,7 @@ export function burstActive(now = Date.now(), s = state) { return now < s.burstU
 export function chainActive(now = Date.now(), s = state) { return now < (s.chainUntil || 0); }
 
 export function burstDuration(s = state) {
-  return (BURST_DURATION + 1.5 * starLevel('burst', s)) * morphAgg(s).burstDurationMult;
+  return (BURST_DURATION + 1.5 * starLevel('burst', s) + (s.burstExtra || 0)) * morphAgg(s).burstDurationMult;
 }
 export function boostDuration(s = state) { return 30 + 3 * starLevel('orb', s); }
 export function burstMult(s = state) { return BURST_MULT * perkAgg(s).burstMult * morphAgg(s).burstMult; }
@@ -183,7 +277,9 @@ export function emptyLattice() {
   return arr;
 }
 
-export function latticeUnlocked(s = state) { return s.totalAll >= LATTICE_UNLOCK; }
+export function latticeUnlocked(s = state) {
+  return seedAgg(s).latticeNow > 0 || s.totalAll >= LATTICE_UNLOCK;
+}
 export function genElement(typeIdx) { return GEN_ELEMENT[typeIdx] || 'grav'; }
 export function elementById(id) {
   for (let i = 0; i < ELEMENTS.length; i++) if (ELEMENTS[i].id === id) return ELEMENTS[i];
@@ -217,7 +313,8 @@ export function orthNeighbors(idx) {
 }
 
 export function latticeSlots(s = state) {
-  return Math.min(10, EMITTER_BASE + starLevel('emitters', s) + Math.floor(s.collapses / 3));
+  return Math.min(10, EMITTER_BASE + starLevel('emitters', s) + Math.floor(s.collapses / 3)
+    + seedAgg(s).emitterBonus + (s.emitterExtra || 0));
 }
 
 export function placedCount(s = state) {
@@ -346,6 +443,9 @@ export function globalMult(now = Date.now(), s = state, opts) {
   v *= 1 + a.swarm * totalGens(s);
   if (chainActive(now, s)) v *= a.chainMult;
   if (burstActive(now, s)) v *= burstMult(s);
+  v *= tempMult(now, s);
+  const sg = seedAgg(s);
+  if (sg.earlyProd !== 1 && s.totalAll < EARLY_PROD_UNTIL) v *= sg.earlyProd;
   return v;
 }
 
@@ -354,7 +454,7 @@ export function eps(now = Date.now(), s = state) {
 }
 
 export function clickMult(s = state) {
-  return Math.pow(1.8, starLevel('clickSync', s)) * morphAgg(s).clickMult;
+  return Math.pow(1.8, starLevel('clickSync', s)) * morphAgg(s).clickMult * seedAgg(s).clickMult;
 }
 export function comboMult(s = state) { return 1 + Math.min(s.combo, COMBO_MAX) * COMBO_STEP; }
 export function critChance(s = state) { return Math.min(0.9, CRIT_CHANCE + perkAgg(s).critChance); }
@@ -383,13 +483,13 @@ export function genCost(i, n = 1, s = state) {
   const g = GENERATORS[i];
   const r = g.growth;
   const raw = g.base * Math.pow(r, s.gens[i]) * (Math.pow(r, n) - 1) / (r - 1);
-  return raw * perkAgg(s).costMult;
+  return raw * perkAgg(s).costMult * seedAgg(s).costMult;
 }
 
 export function maxAffordable(i, s = state) {
   const g = GENERATORS[i];
   const r = g.growth;
-  const cm = perkAgg(s).costMult;
+  const cm = perkAgg(s).costMult * seedAgg(s).costMult;
   const unit = g.base * Math.pow(r, s.gens[i]) * cm;
   if (s.energy < unit) return 0;
   const n = Math.floor(Math.log(1 + (s.energy * (r - 1)) / unit) / Math.log(r));
@@ -448,7 +548,7 @@ export function tap(now = Date.now(), s = state) {
   if (perfectCount > 0) {
     s.perfects += perfectCount;
     const a = perkAgg(s);
-    let add = perfectCount;
+    let add = perfectCount * (1 + seedAgg(s).perfectReso);
     if (a.echoChance > 0 && Math.random() < a.echoChance) { add += 1; echo = true; }
     s.reso = Math.min(resoMax(s), s.reso + add);
     if (s.reso > s.maxReso) s.maxReso = s.reso;
@@ -463,7 +563,7 @@ export function tap(now = Date.now(), s = state) {
 }
 
 export function devourGain(now = Date.now(), s = state) {
-  const mult = perkAgg(s).devourMult * morphAgg(s).devourMult;
+  const mult = perkAgg(s).devourMult * morphAgg(s).devourMult * seedAgg(s).devourMult;
   const base = rawProd(s) * globalMult(now, s, { noMorphProd: true }) * boostMult(now, s);
   return Math.max(1, base * DEVOUR_BASE * mult);
 }
@@ -590,7 +690,7 @@ export function startEnergy(s = state) {
   return lv > 0 ? Math.pow(10, 3 * lv) : 0;
 }
 
-export function perkSlots(s = state) { return 2 + starLevel('slots', s); }
+export function perkSlots(s = state) { return 2 + starLevel('slots', s) + (s.perkSlotExtra || 0); }
 
 export function rollPerkChoices(s = state, n = 3) {
   const taken = s.perks || [];
@@ -801,6 +901,14 @@ export function normalize(data) {
   if (typeof s.perkPicksLeft !== 'number' || !Number.isFinite(s.perkPicksLeft) || s.perkPicksLeft < 0) s.perkPicksLeft = 0;
 
   if (s.morph && !MORPH_BY_ID[s.morph]) s.morph = null;
+  if (s.seed && !SEED_BY_ID[s.seed]) s.seed = null;
+  if (!s.objectives || typeof s.objectives !== 'object') s.objectives = {};
+  if (typeof s.tempMult !== 'number' || !Number.isFinite(s.tempMult) || s.tempMult < 1) s.tempMult = 1;
+  if (typeof s.tempUntil !== 'number' || !Number.isFinite(s.tempUntil) || s.tempUntil < 0) s.tempUntil = 0;
+  const extraKeys = ['emitterExtra', 'burstExtra', 'perkSlotExtra'];
+  for (const ek of extraKeys) {
+    if (typeof s[ek] !== 'number' || !Number.isFinite(s[ek]) || s[ek] < 0) s[ek] = 0;
+  }
 
   // 引力阵：只保留合法且不重复的放置
   const rawLat = Array.isArray(s.lattice) ? s.lattice : [];

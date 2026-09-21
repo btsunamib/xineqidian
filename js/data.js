@@ -181,9 +181,43 @@ export const GEN_ELEMENT = ['grav', 'entropy', 'grav', 'entropy', 'void', 'chron
 export const LATTICE_SIZE   = 5;        // 5×5 网格
 export const LATTICE_CENTER = 12;       // 正中间是核心，不可放置
 export const LATTICE_SCALE  = 0.7;      // 引力阵产出系数
-export const LATTICE_UNLOCK = 1e8;      // 累计能量解锁
+export const LATTICE_UNLOCK = 3e4;      // 累计能量解锁（前期就能玩到）
 export const TIER_MULT      = [0, 1.00, 0.85, 0.70, 0.55]; // 按到核心的曼哈顿距离
 export const OFFLINE_NODE_MULT = 0.2;   // 未连通的发射器只剩 20%
 export const EMITTER_BASE   = 3;        // 初始发射器数量
 export const TIDE_PERIOD    = 40;       // 引力潮汐轮换周期（秒）
 export const TIDE_MULT      = 3;        // 潮汐期间对应系 ×3
+
+// ============ 开局种子：进入游戏 5 秒内的第一个真实决策 ============
+export const SEEDS = [
+  {
+    id: 'ember', name: '炽核', icon: '🔥', color: '#ff8a2b',
+    tag: '手速流',
+    desc: '点击力 ×4，每次完美额外 +1 层共振；代价是机器价格 +25%。',
+    effects: { clickMult: 4, perfectReso: 1, costMult: 1.25 },
+  },
+  {
+    id: 'forge', name: '工核', icon: '⚙️', color: '#5cffa8',
+    tag: '自动化',
+    desc: '开局直接获得 2,000 能量，机器价格 -15%，累计 1e9 前产量 ×3。',
+    effects: { startEnergy: 2000, costMult: 0.85, earlyProd: 3 },
+  },
+  {
+    id: 'lattice', name: '奇核', icon: '🌀', color: '#6ee7ff',
+    tag: '策略流',
+    desc: '开局立刻解锁引力阵并多给 2 个发射器，吞噬收益 ×3。',
+    effects: { latticeNow: 1, emitterBonus: 2, devourMult: 3 },
+  },
+];
+
+export const EARLY_PROD_UNTIL = 1e9;    // 「工核」的前期产量加成截止点
+
+// ============ 前期委托：开局几分钟内的目标与即时奖励 ============
+export const OBJECTIVES = [
+  { id: 'tap10',     name: '手感热身',   desc: '打出 10 次完美一击',      reward: '爆发充能 +60' },
+  { id: 'buy3',      name: '自动化起步', desc: '买下 3 种不同的机器',     reward: '✦1 与 词条次数 +1' },
+  { id: 'devour20',  name: '吞噬入门',   desc: '吞噬 20 个能量团',        reward: '全局产量 ×2 持续 3 分钟' },
+  { id: 'place2',    name: '第一次布阵', desc: '在引力阵放下 2 个发射器', reward: '发射器 +1（永久）' },
+  { id: 'burst1',    name: '第一次爆发', desc: '释放一次奇点爆发',        reward: '爆发时长 +3 秒（永久）' },
+  { id: 'collapse1', name: '第一次坍缩', desc: '完成一次坍缩',            reward: '词条槽位 +1（永久）' },
+];

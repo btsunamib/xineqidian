@@ -87,8 +87,15 @@ await ok('列表渲染完整', () => {
   assert.equal($('achList').querySelectorAll('.ach').length, 34);
   assert.ok($('perkCodex').querySelectorAll('span').length >= 15);
 });
-await ok('开局自动弹出词条抽卡', () => {
-  assert.ok(!$('modal').classList.contains('hidden'), '抽卡弹窗应可见');
+await ok('开局先弹出核心种子选择', () => {
+  assert.ok(!$('modal').classList.contains('hidden'), '种子弹窗应可见');
+  assert.equal(w.document.querySelectorAll('.seed-card').length, 3);
+});
+await ok('选定种子后自动进入词条抽卡', async () => {
+  click(w.document.querySelector('.seed-card'));
+  assert.ok(core.state.seed, '种子应已选定');
+  await sleep(450);
+  assert.ok(!$('modal').classList.contains('hidden'), '词条抽卡应弹出');
   assert.equal(w.document.querySelectorAll('.draft-card').length, 3);
 });
 
@@ -374,6 +381,16 @@ await ok('引力标签页可切换', () => {
   click(w.document.querySelector('#tabs button[data-view="lattice"]'));
   assert.ok($('view-lattice').classList.contains('active'));
   assert.ok($('tideInfo').textContent.length > 0);
+});
+
+console.log('\n[DOM-10] 种子与委托面板');
+await ok('种子已选定并生效', () => {
+  assert.ok(core.state.seed, '应已选定种子');
+});
+await ok('委托面板渲染 6 条并显示进度', () => {
+  ui.renderAll();
+  assert.equal(w.document.querySelectorAll('#objList .obj-item').length, 6);
+  assert.match($('objCount').textContent, /^\d\/6$/);
 });
 
 console.log('\n通过 ' + pass + ' 项 DOM 检查' + (fail ? '（' + fail + ' 项失败）' : '，全部正常') + '\n');

@@ -3,7 +3,7 @@ import {
   GENERATORS, STAR_UPGRADES, PERKS, ACHIEVEMENTS, MORPHS,
   RARE_COLOR, RARE_LABEL, COMBO_MAX, COMBO_WINDOW, CHARGE_MAX, RESO_MAX,
   BOOST_MULT, COLLAPSE_REQUIRE, SINGULARITY_REQUIRE, ECHO_RATE,
-  LATTICE_CENTER, LATTICE_UNLOCK,
+  LATTICE_CENTER, LATTICE_UNLOCK, SEEDS, OBJECTIVES,
 } from './data.js';
 import * as core from './core.js';
 import { format, formatTime } from './util.js';
@@ -31,6 +31,8 @@ let draftDismissed = false;
 let modalOnClose = null;
 let latBound = false;
 let latTarget = -1;
+let seedBound = false;
+let inSeed = false;
 let lastList = 0;
 let lastAch = 0;
 let lastAutoBuy = 0;
@@ -662,13 +664,25 @@ export function hud(now) {
       vibrate(14);
       buildAchFlags();
     }
+    const gotObj = core.checkObjectives(s);
+    if (gotObj.length) {
+      gotObj.forEach(o => toast('📋 ' + o.name + ' 完成 · ' + o.reward, 'green'));
+      audio.sfxAchieve();
+      vibrate(12);
+      renderObjectives();
+    }
   }
 
   // 自动购买
   if (s.autoBuy && now - lastAutoBuy > 250) { lastAutoBuy = now; core.autoBuyTick(s); }
 
-// 词条抽卡（只排队一次，避免重复触发与互相覆盖）
-  if (!inDraft && !draftQueued && !draftDismissed && s.perkPicksLeft > 0 && now > draftArmedAt && $('modal').classList.contains('hidden')) {
+  // 开局种子：进入游戏的第一个决策
+  if (!inSeed && !core.seedChosen(s) && now > draftArmedAt && $('modal').classList.contains('hidden')) {
+    showSeedModal();
+  }
+
+  // 词条抽卡（只排队一次，避免重复触发与互相覆盖）
+  if (!inDraft && !draftQueued && !draftDismissed && core.seedChosen(s) && s.perkPicksLeft > 0 && now > draftArmedAt && $('modal').classList.contains('hidden')) {
     draftQueued = true;
     setTimeout(() => {
       draftQueued = false;
@@ -684,7 +698,7 @@ export function hud(now) {
     if (now >= s.recordStart + s.recordLen * 1000) finishRecord();
   }
 
-  if (now - lastList > 240) { lastList = now; updateLists(now, false); renderLattice(); }
+if (now - lastList > 240) { lastList = now; updateLists(now, false); renderLattice(); renderObjectives(); }
 }
 
 function buildAchFlags() {
@@ -702,6 +716,7 @@ export function renderAll() {
   renderPerkPanel();
   renderEchoPanel();
   renderLattice();
+  renderObjectives();
   renderStats();
   syncToggles();
 }
@@ -1059,6 +1074,60 @@ function onClearLattice() {
   audio.sfxError();
   toast('引力阵已清空');
   renderLattice();
+}
+
+/* ---------------- 开局种子 ---------------- */
+function showSeedModal() {
+  if (inSeed || core.seedChosen(core.state)) return;
+  inSeed = true;
+  const cards = SEEDS.map(sd =>
+    '<button type="button" class="seed-card" data-seed="' + sd.id + '" style="--sc:' + sd.color + '">' +
+      '<span class="si">' + sd.icon + '</span>' +
+      '<span><span class="sn">' + sd.name + ' <em>' + sd.tag + '</em></span>' +
+      '<span class="sd">' + sd.desc + '</span></span>' +
+    '</button>').join('');
+  showModal('核心种子',
+    '<div class="draft-title">你的核心从哪一颗种子开始？</div>' +
+    '<div class="draft-sub">开局决定前期节奏 · 本局不可更改</div>' +
+    '<div class="draft-list">' + cards + '</div>',
+    [], true);
+  const box = $('modalBody');
+  if (!seedBound) { seedBound = true; box.addEventListener('click', onSeedClick); }
+}
+
+function onSeedClick(ev) {
+  const card = ev.target && ev.target.closest ? ev.target.closest('.seed-card') : null;
+  if (!card) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  const id = card.getAttribute('data-seed');
+  const sd = core.chooseSeed(id, core.state);
+  if (!sd) { audio.sfxError(); return; }
+  audio.sfxUpgrade();
+  vibrate([12, 30, 12]);
+  fx.confettiBurst();
+  inSeed = false;
+  hideModal();
+  toast('核心种子：' + sd.icon + ' ' + sd.name + ' · ' + sd.tag, 'violet');
+  core.save();
+  renderAll();
+}
+
+/* ---------------- 前期委托 ---------------- */
+function renderObjectives() {
+  const s = core.state;
+  const box = $('objList');
+  if (!box) return;
+  const cnt = $('objCount');
+  if (cnt) cnt.textContent = core.objectiveCount(s) + '/' + OBJECTIVES.length;
+  box.innerHTML = OBJECTIVES.map(o => {
+    const done = core.objectiveDone(o.id, s);
+    return '<div class="obj-item' + (done ? ' done' : '') + '">' +
+      '<span class="oi">' + (done ? '✅' : '⬜') + '</span>' +
+      '<span><span class="on">' + o.name + '</span><span class="od">' + o.desc + '</span></span>' +
+      '<span class="or">' + o.reward + '</span>' +
+      '</div>';
+  }).join('');
 }
 
 function renderStats() {

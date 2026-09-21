@@ -352,6 +352,32 @@ button.draft-card{width:100%;font-family:inherit;color:var(--txt);text-align:lef
 .lat-pick .lp-n{font-size:13px;font-weight:800}
 .lat-pick .lp-e{font-size:10.5px;color:var(--dim);white-space:nowrap}
 
+/* ---------- 前期委托 ---------- */
+.obj-list{display:flex;flex-direction:column;gap:6px}
+.obj-item{display:grid;grid-template-columns:20px 1fr auto;gap:8px;align-items:center;
+  font-size:11.5px;color:var(--dim);padding:5px 7px;border-radius:9px;
+  background:rgba(255,255,255,.03);border:1px solid transparent}
+.obj-item .oi{text-align:center;font-size:12px}
+.obj-item .on{font-weight:700;color:var(--txt)}
+.obj-item .od{font-size:10px;color:var(--dim);display:block;margin-top:1px}
+.obj-item .or{font-size:10px;color:var(--gold);white-space:nowrap}
+.obj-item.done{opacity:.55;border-color:rgba(92,255,168,.3);background:rgba(92,255,168,.06)}
+.obj-item.done .on{color:var(--green);text-decoration:line-through}
+
+/* ---------- 种子选择卡 ---------- */
+.seed-card{position:relative;display:grid;grid-template-columns:44px 1fr;gap:11px;align-items:center;
+  width:100%;background:rgba(255,255,255,.045);border:1px solid var(--line);border-radius:14px;
+  padding:12px;cursor:pointer;font-family:inherit;color:var(--txt);text-align:left;
+  transition:transform .1s,border-color .2s,background .2s;overflow:hidden}
+.seed-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--sc,#6ee7ff)}
+.seed-card:hover{background:rgba(255,255,255,.08)}
+.seed-card:active{transform:scale(.98)}
+.seed-card .si{font-size:26px;text-align:center}
+.seed-card .sn{font-size:14.5px;font-weight:900;color:var(--sc,#6ee7ff);display:flex;align-items:center;gap:7px}
+.seed-card .sn em{font-style:normal;font-size:9.5px;font-weight:800;padding:1px 6px;border-radius:6px;
+  background:rgba(255,255,255,.09);color:var(--dim)}
+.seed-card .sd{font-size:11.5px;color:var(--dim);line-height:1.5;margin-top:4px}
+
 @media(min-width:640px){
   #topbar,#stage,#actionbar,#views{max-width:660px;margin-left:auto;margin-right:auto;width:100%}
 }
